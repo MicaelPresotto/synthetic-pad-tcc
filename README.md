@@ -58,15 +58,35 @@ Experiments use established face PAD datasets (MSU-MFSD, Replay-Attack) as the s
 
 ## Repository structure
 
+The code follows a thin **ports and adapters** layout. The domain layer owns the
+two contracts of the experimental loop — `AttackGenerator` and `LivenessDetector`
+— and depends on nothing but NumPy; every strategy and every detector is an
+adapter behind one of those ports. That is what keeps the strategies in the table
+above directly comparable, instead of three separate codebases.
+
 ```
 synthetic-pad/
-├── generators/      # attack generation strategies (shared interface)
-├── judge/           # liveness detectors used to score attacks
-├── experiments/     # experiment scripts and notebooks
-├── evaluation/      # metrics (APCER, BPCER, ACER, EER, AUC)
-├── data/            # datasets (gitignored)
-└── results/         # experiment outputs
+├── src/synthetic_pad/
+│   ├── domain/        # pure types + the generator/detector ports (no I/O)
+│   ├── generators/    # attack strategies
+│   ├── judge/         # liveness detectors
+│   └── evaluation/    # metrics (APCER, BPCER, ACER, EER, AUC)
+├── experiments/       # application layer: wires a generator to a judge
+├── tests/             # mirrors src/
+├── data/              # datasets (gitignored)
+└── results/           # experiment outputs (gitignored)
 ```
+
+Two conventions carry most of the reproducibility weight. Parameters live in a
+frozen config dataclass per generator, never as loose keyword arguments, so a run
+is described by one serialisable object, which `describe()` returns — any figure
+in the thesis traces back to the parameters that produced it. And generators own
+an explicitly seeded `numpy.random.Generator` rather than calling the global
+`numpy.random` functions.
+
+Dependencies only ever point *into* `domain/`. Nothing in `generators/`, `judge/`
+or `evaluation/` imports from a sibling, which is what lets a strategy be swapped
+without touching the detector that scores it.
 
 ## Development
 
@@ -84,6 +104,7 @@ The gates, which are exactly what the pipeline runs:
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy
+uv run pytest
 ```
 
 `pre-commit` runs the fast ones on every commit, so a failure surfaces before the
@@ -91,8 +112,8 @@ push. It also runs `gitleaks`, which is the only check that can stop a secret
 *before* it enters the history rather than reporting it afterwards.
 
 `main` is protected: no direct pushes, every change lands through a pull request,
-and both workflows must be green to merge. **Health check** runs `ruff` and
-`mypy --strict`; **Security** runs `gitleaks` — over the pull request's commits on
+and both workflows must be green to merge. **Health check** runs `ruff`,
+`mypy --strict` and `pytest`; **Security** runs `gitleaks` — over the pull request's commits on
 a PR, and over the whole history on a manual `gh workflow run security.yml`.
 Dependabot opens weekly dependency updates.
 
@@ -100,7 +121,7 @@ Dependabot opens weekly dependency updates.
 
 🚧 Work in progress — active development for TCC II (2026.2).
 
-- [ ] Project scaffolding and generator interface
+- [x] Project scaffolding and generator interface
 - [x] CI/CD pipeline and security gates
 - [ ] Moiré / display recapture baseline
 - [ ] Liveness detector (judge)
