@@ -30,3 +30,6 @@ jobs:
 
       - name: Types
         run: uv run mypy
+
+      - name: Tests
+        run: uv run pytest --cov --cov-report=term-missing
