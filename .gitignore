@@ -1,11 +1,14 @@
 __pycache__/
 *.py[cod]
 .venv/
-venv/
-.env
-.DS_Store
-.ipynb_checkpoints/
 
+.ruff_cache/
+.mypy_cache/
+
+.DS_Store
+.idea/
+
+# Biometric data and experiment outputs never enter git.
 data/*
 !data/.gitkeep
 results/*
