@@ -68,11 +68,40 @@ synthetic-pad/
 └── results/         # experiment outputs
 ```
 
+## Development
+
+Dependencies are managed with [uv](https://docs.astral.sh/uv/) and pinned in
+`uv.lock`, so an experiment can be re-run against the exact same environment.
+
+```bash
+uv sync                 # create the venv and install everything
+uv run pre-commit install
+```
+
+The gates, which are exactly what the pipeline runs:
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy
+```
+
+`pre-commit` runs the fast ones on every commit, so a failure surfaces before the
+push. It also runs `gitleaks`, which is the only check that can stop a secret
+*before* it enters the history rather than reporting it afterwards.
+
+`main` is protected: no direct pushes, every change lands through a pull request,
+and both workflows must be green to merge. **Health check** runs `ruff` and
+`mypy --strict`; **Security** runs `gitleaks` — over the pull request's commits on
+a PR, and over the whole history on a manual `gh workflow run security.yml`.
+Dependabot opens weekly dependency updates.
+
 ## Status
 
 🚧 Work in progress — active development for TCC II (2026.2).
 
 - [ ] Project scaffolding and generator interface
+- [x] CI/CD pipeline and security gates
 - [ ] Moiré / display recapture baseline
 - [ ] Liveness detector (judge)
 - [ ] Evaluation metrics

@@ -1,0 +1,74 @@
+[project]
+name = "synthetic-pad"
+version = "0.1.0"
+description = "Synthetic presentation attack generation and evaluation for face liveness detection (UFSC TCC)."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Micael Presotto", email = "micael@mvst.co" }]
+keywords = ["biometrics", "face-anti-spoofing", "presentation-attack-detection", "synthetic-data"]
+
+dependencies = [
+    "numpy>=2.0",
+    "opencv-python>=4.10",
+    "pillow>=10.0",
+    "scikit-learn>=1.5",
+    "matplotlib>=3.9",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.9",
+    "mypy>=1.14",
+    "pre-commit>=4.0",
+]
+
+[project.urls]
+Repository = "https://github.com/MicaelPresotto/synthetic-pad-tcc"
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "N",        # pep8-naming
+    "UP",       # pyupgrade
+    "B",        # flake8-bugbear
+    "C4",       # flake8-comprehensions
+    "SIM",      # flake8-simplify
+    "ARG",      # unused arguments
+    "PTH",      # prefer pathlib
+    "RUF",      # ruff-specific
+    "S",        # flake8-bandit (Python SAST, no separate tool needed)
+    "NPY",      # numpy-specific rules
+    "D",        # pydocstyle
+]
+ignore = [
+    "D100",  # missing docstring in public module
+    "D104",  # missing docstring in public package
+    "D107",  # missing docstring in __init__
+    "D203",  # conflicts with D211
+    "D213",  # conflicts with D212
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.12"
+files = ["evaluation", "generators", "judge"]
+strict = true
+warn_unreachable = true
+disallow_untyped_defs = true
+no_implicit_reexport = true
+
+[[tool.mypy.overrides]]
+module = ["cv2.*", "matplotlib.*", "sklearn.*"]
+ignore_missing_imports = true
