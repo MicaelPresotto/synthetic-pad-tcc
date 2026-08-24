@@ -38,6 +38,58 @@ Each generator implements the same interface, so strategies can be swapped and c
 | Diffusion-based | Planned | Generative synthesis of attack samples using diffusion models |
 | VLM-conditioned | Planned | Attack generation conditioned through vision-language models |
 
+#### The display recapture pipeline
+
+A replay attack is a bona fide face shown on a screen and photographed again, so the
+baseline generator models that optical path rather than stacking arbitrary
+augmentations. The stages run in the order light actually travels, because the order
+changes the result:
+
+| # | Stage | What it models | Parameters |
+|---|---|---|---|
+| 1 | Geometry | The camera is never square-on to the screen, so the image arrives keystoned and slightly rolled | `tilt_x`, `tilt_y`, `rotation_deg` |
+| 2 | Tone | The panel cannot emit true black and the camera clips the highlights, so contrast and dynamic range both shrink | `contrast`, `black_level`, `white_level` |
+| 3 | Glare | A light source in the room mirrored on the screen glass | `glare_intensity`, `glare_extent` |
+| 4 | Lens | Defocus and the finite pixel fill factor soften everything | `blur_sigma` |
+| 5 | Moiré | The screen's pixel grid beating against the sensor's | `moire_amplitude`, `moire_frequency`, `moire_angle_deg`, `moire_harmonics`, `moire_chroma_shift`, `moire_cross_weight` |
+| 6 | Noise | Sensor read noise on a dim, indirect subject | `noise_sigma` |
+
+The ordering is load-bearing. Glare lies on the glass, physically in front of the lens,
+so stage 4 blurs it — a crisp highlight would read as a sticker rather than a
+reflection. Moiré is born at the sensor, after the lens, so it stays sharp; generated
+before stage 4 it would be washed out.
+
+Three modelling decisions separate this from a generic filter stack.
+
+**Moiré is generated as the beat, not as the two grids.** The effect arises from two
+sampling grids that almost agree — say screen pixels every 0.100 mm, sampled by the
+sensor every 0.104 mm. The alignment error accumulates and resets, producing a pattern
+roughly 25 samples wide out of two grids 0.1 mm apart. The visible interference is far
+coarser than either grid, and the grids themselves are finer than a single output
+pixel, so the beat is synthesised directly. `moire_frequency` is therefore measured in
+cycles across the image width, which holds the appearance stable across resolutions;
+below a two-pixel fringe period the parameter stops describing the output and the
+generator warns. The default of 20 cycles — an 11 px fringe at the 224 px working
+resolution — was picked from the sweep below, and the ±25% per-image jitter keeps the
+whole range inside the band that still reads as moiré rather than as fine dither.
+
+**The modulation is multiplicative.** Moiré modulates emitted light, so a black region,
+where the panel emits nothing, has nothing to modulate and stays black. An additive
+pattern would lift those blacks, which no real recapture does.
+
+**The fringes are chromatic.** A display's red, green and blue subpixels sit at
+different physical positions, so each channel aliases out of step with the others. A
+per-channel phase offset (`moire_chroma_shift`) reproduces the rainbow banding of a
+real recapture; without it the fringes come out grey, which is the wrong artifact.
+
+Every stage switches off through its own parameter, so the neutral configuration is the
+identity function — which is what makes an ablation over the individual artifacts
+possible. Parameters are tuned visually against a synthetic test chart or a real face:
+
+```bash
+uv run python scripts/preview_moire.py --sweep moire_frequency=8:70:8
+```
+
 ### Evaluation
 
 Attacks are scored by a liveness detector and evaluated using standard PAD metrics:
@@ -71,6 +123,7 @@ synthetic-pad/
 │   ├── generators/    # attack strategies
 │   ├── judge/         # liveness detectors
 │   └── evaluation/    # metrics (APCER, BPCER, ACER, EER, AUC)
+├── scripts/           # visual tuning tools for the generators
 ├── experiments/       # application layer: wires a generator to a judge
 ├── tests/             # mirrors src/
 ├── data/              # datasets (gitignored)
@@ -123,7 +176,7 @@ Dependabot opens weekly dependency updates.
 
 - [x] Project scaffolding and generator interface
 - [x] CI/CD pipeline and security gates
-- [ ] Moiré / display recapture baseline
+- [x] Moiré / display recapture baseline
 - [ ] Liveness detector (judge)
 - [ ] Evaluation metrics
 - [ ] First end-to-end experiment
