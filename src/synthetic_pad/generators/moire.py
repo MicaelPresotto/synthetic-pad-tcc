@@ -25,10 +25,6 @@ GLARE_CENTRE_Y_RANGE = (0.05, 0.55)
 GLARE_ASPECT = 0.32
 GLARE_ANGLE_DEG = -35.0
 
-MOIRE_HARMONIC_FALLOFF = 1.6
-MOIRE_BEAT_CYCLES_PER_WIDTH = 2.5
-MOIRE_BEAT_DEPTH = 0.6
-
 
 @dataclass(frozen=True, slots=True)
 class MoireConfig:
@@ -44,7 +40,6 @@ class MoireConfig:
     moire_amplitude: float = 0.10
     moire_cycles_per_width: float = 20.0
     moire_angle_deg: float = 12.0
-    moire_harmonics: int = 3
     moire_chroma_shift_rad: float = 0.9
     moire_cross_weight: float = 0.45
     noise_sigma_levels: float = 2.0
@@ -65,8 +60,6 @@ class MoireConfig:
             variation=self.variation,
         )
         require_unit_interval(glare_intensity=self.glare_intensity)
-        if self.moire_harmonics < 1:
-            raise ValueError(f"moire_harmonics must be at least 1, got {self.moire_harmonics}")
         if not 0.0 <= self.black_level < self.white_level <= 1.0:
             raise ValueError(
                 "require 0 <= black_level < white_level <= 1, got "
@@ -189,19 +182,12 @@ class MoireRecaptureGenerator(AttackGenerator):
         for axis, axis_weight in ((along_grating, 1.0), (across_grating, cfg.moire_cross_weight)):
             if axis_weight == 0.0:
                 continue
-            for harmonic in range(1, cfg.moire_harmonics + 1):
-                amplitude = axis_weight / harmonic**MOIRE_HARMONIC_FALLOFF
-                phase = rng.uniform(0.0, 2.0 * math.pi)
-                carrier = 2.0 * math.pi * cycles_per_width * harmonic * axis + phase
-                pattern += amplitude * np.sin(carrier[..., None] + channel_phases)
-                weight_total += amplitude
+            phase = rng.uniform(0.0, 2.0 * math.pi)
+            carrier = 2.0 * math.pi * cycles_per_width * axis + phase
+            pattern += axis_weight * np.sin(carrier[..., None] + channel_phases)
+            weight_total += axis_weight
 
-        pattern /= weight_total
-        beat_phase = rng.uniform(0.0, 2.0 * math.pi)
-        beat_carrier = 2.0 * math.pi * MOIRE_BEAT_CYCLES_PER_WIDTH * across_grating + beat_phase
-        beat_envelope = 1.0 - MOIRE_BEAT_DEPTH * (0.5 - 0.5 * np.sin(beat_carrier))
-        pattern *= beat_envelope[..., None]
-        return canvas * (1.0 + cfg.moire_amplitude * pattern)
+        return canvas * (1.0 + cfg.moire_amplitude * pattern / weight_total)
 
     def _warn_if_unresolvable(self, cycles_per_width: float, width: int) -> None:
         period_px = width / cycles_per_width

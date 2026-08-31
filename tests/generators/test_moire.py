@@ -38,7 +38,6 @@ EVERY_STAGE = [
 MEANINGLESS_PARAMETERS = [
     ({"black_level": 0.9, "white_level": 0.5}, "black_level < white_level"),
     ({"contrast": 0.0}, "contrast must be positive"),
-    ({"moire_harmonics": 0}, "at least 1"),
     ({"moire_cycles_per_width": 0.0}, "moire_cycles_per_width must be positive"),
     ({"moire_amplitude": -0.1}, "non-negative"),
     ({"noise_sigma_levels": -1.0}, "non-negative"),

@@ -51,7 +51,7 @@ changes the result:
 | 2 | Tone | The panel cannot emit true black and the camera clips the highlights, so contrast and dynamic range both shrink | `contrast`, `black_level`, `white_level` |
 | 3 | Glare | A light source in the room mirrored on the screen glass | `glare_intensity`, `glare_extent` (fraction of the image width) |
 | 4 | Lens | Defocus and the finite pixel fill factor soften everything | `blur_sigma_px` |
-| 5 | Moiré | The screen's pixel grid beating against the sensor's | `moire_amplitude`, `moire_cycles_per_width`, `moire_angle_deg`, `moire_harmonics`, `moire_chroma_shift_rad`, `moire_cross_weight` |
+| 5 | Moiré | The screen's pixel grid beating against the sensor's | `moire_amplitude`, `moire_cycles_per_width`, `moire_angle_deg`, `moire_chroma_shift_rad`, `moire_cross_weight` |
 | 6 | Noise | Sensor read noise on a dim, indirect subject | `noise_sigma_levels` |
 
 The ordering is load-bearing. Glare lies on the glass, physically in front of the lens,
@@ -81,6 +81,14 @@ pattern would lift those blacks, which no real recapture does.
 different physical positions, so each channel aliases out of step with the others. A
 per-channel phase offset (`moire_chroma_shift_rad`) reproduces the rainbow banding of a
 real recapture; without it the fringes come out grey, which is the wrong artifact.
+
+**The model is deliberately shallow.** An earlier draft summed three harmonics per
+grating and modulated the whole pattern by a slow beat envelope. An ablation over the
+individual terms, rendered at the 224 px working resolution, showed the cross grating
+and the chroma offset carrying the visual change while the harmonics and the envelope
+contributed almost nothing for four extra parameters and a nested loop, so both came
+out. What survives is one sinusoid per grating direction. If the detector later shows
+those terms matter, they come back with a measurement behind them.
 
 Every stage switches off through its own parameter, so the neutral configuration is the
 identity function — which is what makes an ablation over the individual artifacts
