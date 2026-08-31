@@ -83,6 +83,17 @@ def load_image(path: Path) -> RgbImage:
     return np.asarray(cv2.cvtColor(raw, cv2.COLOR_BGR2RGB), dtype=np.uint8)
 
 
+def fit_to_working_resolution(image: RgbImage, size: int) -> RgbImage:
+    height, width = image.shape[:2]
+    scale = size / min(height, width)
+    resized = cv2.resize(
+        image, (round(width * scale), round(height * scale)), interpolation=cv2.INTER_AREA
+    )
+    top = (resized.shape[0] - size) // 2
+    left = (resized.shape[1] - size) // 2
+    return np.asarray(resized[top : top + size, left : left + size], dtype=np.uint8)
+
+
 def label_panel(image: RgbImage, text: str) -> RgbImage:
     bar = np.full((LABEL_HEIGHT, image.shape[1], 3), BACKGROUND, dtype=np.uint8)
     cv2.putText(
@@ -148,7 +159,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--size",
         type=int,
         default=DEFAULT_CHART_SIZE,
-        help=f"test chart side in pixels (default: {DEFAULT_CHART_SIZE}, ignored with --input)",
+        help="working resolution in pixels; --input is cropped and resized to it "
+        f"(default: {DEFAULT_CHART_SIZE})",
     )
     parser.add_argument("--sweep", help="walk one field: FIELD=START:STOP:STEPS")
     parser.add_argument("--columns", type=int, default=3, help="panels per row in sweep mode")
@@ -176,8 +188,12 @@ def config_from_args(args: argparse.Namespace) -> MoireConfig:
 def main() -> None:
     args = build_parser().parse_args()
     base_config = config_from_args(args)
-    source = load_image(args.input) if args.input else build_test_chart(args.size)
-    origin = args.input.name if args.input else f"test chart {args.size}px"
+    if args.input:
+        source = fit_to_working_resolution(load_image(args.input), args.size)
+        origin = f"{args.input.name} at {args.size}px"
+    else:
+        source = build_test_chart(args.size)
+        origin = f"test chart {args.size}px"
 
     if args.sweep:
         field_name, values = parse_sweep(args.sweep)
