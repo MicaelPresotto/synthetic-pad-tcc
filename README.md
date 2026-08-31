@@ -47,12 +47,12 @@ changes the result:
 
 | # | Stage | What it models | Parameters |
 |---|---|---|---|
-| 1 | Geometry | The camera is never square-on to the screen, so the image arrives keystoned and slightly rolled | `tilt_x`, `tilt_y`, `rotation_deg` |
+| 1 | Geometry | The camera is never square-on to the screen, so the image arrives keystoned and slightly rolled | `tilt_x`, `tilt_y` (fractions of the perpendicular dimension), `rotation_deg` |
 | 2 | Tone | The panel cannot emit true black and the camera clips the highlights, so contrast and dynamic range both shrink | `contrast`, `black_level`, `white_level` |
-| 3 | Glare | A light source in the room mirrored on the screen glass | `glare_intensity`, `glare_extent` |
-| 4 | Lens | Defocus and the finite pixel fill factor soften everything | `blur_sigma` |
-| 5 | Moiré | The screen's pixel grid beating against the sensor's | `moire_amplitude`, `moire_frequency`, `moire_angle_deg`, `moire_harmonics`, `moire_chroma_shift`, `moire_cross_weight` |
-| 6 | Noise | Sensor read noise on a dim, indirect subject | `noise_sigma` |
+| 3 | Glare | A light source in the room mirrored on the screen glass | `glare_intensity`, `glare_extent` (fraction of the image width) |
+| 4 | Lens | Defocus and the finite pixel fill factor soften everything | `blur_sigma_px` |
+| 5 | Moiré | The screen's pixel grid beating against the sensor's | `moire_amplitude`, `moire_cycles_per_width`, `moire_angle_deg`, `moire_harmonics`, `moire_chroma_shift_rad`, `moire_cross_weight` |
+| 6 | Noise | Sensor read noise on a dim, indirect subject | `noise_sigma_levels` |
 
 The ordering is load-bearing. Glare lies on the glass, physically in front of the lens,
 so stage 4 blurs it — a crisp highlight would read as a sticker rather than a
@@ -66,10 +66,10 @@ sampling grids that almost agree — say screen pixels every 0.100 mm, sampled b
 sensor every 0.104 mm. The alignment error accumulates and resets, producing a pattern
 roughly 25 samples wide out of two grids 0.1 mm apart. The visible interference is far
 coarser than either grid, and the grids themselves are finer than a single output
-pixel, so the beat is synthesised directly. `moire_frequency` is therefore measured in
+pixel, so the beat is synthesised directly. `moire_cycles_per_width` is therefore measured in
 cycles across the image width, which holds the appearance stable across resolutions;
 below a two-pixel fringe period the parameter stops describing the output and the
-generator warns. The default of 20 cycles — an 11 px fringe at the 224 px working
+generator warns. Every other parameter carries its unit in its own name. The default of 20 cycles — an 11 px fringe at the 224 px working
 resolution — was picked from the sweep below, and the ±25% per-image jitter keeps the
 whole range inside the band that still reads as moiré rather than as fine dither.
 
@@ -79,7 +79,7 @@ pattern would lift those blacks, which no real recapture does.
 
 **The fringes are chromatic.** A display's red, green and blue subpixels sit at
 different physical positions, so each channel aliases out of step with the others. A
-per-channel phase offset (`moire_chroma_shift`) reproduces the rainbow banding of a
+per-channel phase offset (`moire_chroma_shift_rad`) reproduces the rainbow banding of a
 real recapture; without it the fringes come out grey, which is the wrong artifact.
 
 Every stage switches off through its own parameter, so the neutral configuration is the
@@ -87,7 +87,7 @@ identity function — which is what makes an ablation over the individual artifa
 possible. Parameters are tuned visually against a synthetic test chart or a real face:
 
 ```bash
-uv run python scripts/preview_moire.py --sweep moire_frequency=8:70:8
+uv run python scripts/preview_moire.py --sweep moire_cycles_per_width=8:70:8
 ```
 
 ### Evaluation

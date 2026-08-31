@@ -1,10 +1,3 @@
-"""Replay-attack generator: a face shown on a screen and photographed again.
-
-Stages run in physical light-path order, and the order changes the result — glare lies on
-the glass so the lens that follows blurs it, whereas moiré is born at the sensor and
-therefore stays crisp. The README documents the full chain.
-"""
-
 import hashlib
 import math
 import warnings
@@ -17,6 +10,11 @@ import numpy as np
 
 from synthetic_pad.domain.image import RgbImage, ensure_rgb_uint8
 from synthetic_pad.domain.ports import AttackGenerator
+from synthetic_pad.domain.validation import (
+    require_non_negative,
+    require_positive,
+    require_unit_interval,
+)
 
 type FloatImage = np.ndarray[Any, np.dtype[np.float64]]
 
@@ -28,19 +26,12 @@ GLARE_ASPECT = 0.32
 GLARE_ANGLE_DEG = -35.0
 
 MOIRE_HARMONIC_FALLOFF = 1.6
-MOIRE_BEAT_FREQUENCY = 2.5
+MOIRE_BEAT_CYCLES_PER_WIDTH = 2.5
 MOIRE_BEAT_DEPTH = 0.6
 
 
 @dataclass(frozen=True, slots=True)
 class MoireConfig:
-    """Parameters of the display-recapture simulation.
-
-    Units the names cannot carry: ``tilt_x`` and ``tilt_y`` are fractions of the
-    perpendicular dimension, ``moire_frequency`` counts cycles across the image width,
-    and ``noise_sigma`` is on the 0-255 scale.
-    """
-
     tilt_x: float = 0.05
     tilt_y: float = 0.03
     rotation_deg: float = 0.8
@@ -49,40 +40,37 @@ class MoireConfig:
     white_level: float = 0.93
     glare_intensity: float = 0.20
     glare_extent: float = 0.26
-    blur_sigma: float = 0.7
+    blur_sigma_px: float = 0.7
     moire_amplitude: float = 0.10
-    moire_frequency: float = 20.0
+    moire_cycles_per_width: float = 20.0
     moire_angle_deg: float = 12.0
     moire_harmonics: int = 3
-    moire_chroma_shift: float = 0.9
+    moire_chroma_shift_rad: float = 0.9
     moire_cross_weight: float = 0.45
-    noise_sigma: float = 2.0
+    noise_sigma_levels: float = 2.0
     variation: float = 0.25
     seed: int = 20260823
 
     def __post_init__(self) -> None:
+        require_positive(
+            contrast=self.contrast,
+            glare_extent=self.glare_extent,
+            moire_cycles_per_width=self.moire_cycles_per_width,
+        )
+        require_non_negative(
+            blur_sigma_px=self.blur_sigma_px,
+            moire_amplitude=self.moire_amplitude,
+            moire_cross_weight=self.moire_cross_weight,
+            noise_sigma_levels=self.noise_sigma_levels,
+            variation=self.variation,
+        )
+        require_unit_interval(glare_intensity=self.glare_intensity)
+        if self.moire_harmonics < 1:
+            raise ValueError(f"moire_harmonics must be at least 1, got {self.moire_harmonics}")
         if not 0.0 <= self.black_level < self.white_level <= 1.0:
             raise ValueError(
                 "require 0 <= black_level < white_level <= 1, got "
                 f"black_level={self.black_level}, white_level={self.white_level}"
-            )
-        if self.contrast <= 0.0:
-            raise ValueError(f"contrast must be positive, got {self.contrast}")
-        if self.moire_harmonics < 1:
-            raise ValueError(f"moire_harmonics must be at least 1, got {self.moire_harmonics}")
-        if self.moire_frequency <= 0.0:
-            raise ValueError(f"moire_frequency must be positive, got {self.moire_frequency}")
-        for field_name in ("moire_amplitude", "blur_sigma", "noise_sigma", "variation"):
-            value: float = getattr(self, field_name)
-            if value < 0.0:
-                raise ValueError(f"{field_name} must be non-negative, got {value}")
-        if not 0.0 <= self.glare_intensity <= 1.0:
-            raise ValueError(f"glare_intensity must lie in [0, 1], got {self.glare_intensity}")
-        if self.glare_extent <= 0.0:
-            raise ValueError(f"glare_extent must be positive, got {self.glare_extent}")
-        if self.moire_cross_weight < 0.0:
-            raise ValueError(
-                f"moire_cross_weight must be non-negative, got {self.moire_cross_weight}"
             )
 
 
@@ -108,10 +96,6 @@ class MoireRecaptureGenerator(AttackGenerator):
         return {"generator": self.name, **asdict(self._config)}
 
     def _apply_geometry(self, canvas: FloatImage, rng: np.random.Generator) -> FloatImage:
-        """The target quad over-covers the frame on purpose. Left inset, the keystone
-        would strand border pixels that no source pixel maps to, and that rim would
-        become a cue in itself rather than part of the recapture.
-        """
         cfg = self._config
         tilt_x = cfg.tilt_x * self._jitter(rng)
         tilt_y = cfg.tilt_y * self._jitter(rng)
@@ -157,9 +141,6 @@ class MoireRecaptureGenerator(AttackGenerator):
         return cfg.black_level + toned * (cfg.white_level - cfg.black_level)
 
     def _apply_glare(self, canvas: FloatImage, rng: np.random.Generator) -> FloatImage:
-        """The highlight is biased to the upper half, where the lights of a room
-        actually reflect off a screen.
-        """
         cfg = self._config
         if cfg.glare_intensity == 0.0:
             return canvas
@@ -180,17 +161,14 @@ class MoireRecaptureGenerator(AttackGenerator):
         return _screen_blend(canvas, glare[..., None])
 
     def _apply_lens(self, canvas: FloatImage) -> FloatImage:
-        if self._config.blur_sigma == 0.0:
+        if self._config.blur_sigma_px == 0.0:
             return canvas
         blurred = cv2.GaussianBlur(
-            canvas, (0, 0), sigmaX=self._config.blur_sigma, borderType=cv2.BORDER_REPLICATE
+            canvas, (0, 0), sigmaX=self._config.blur_sigma_px, borderType=cv2.BORDER_REPLICATE
         )
         return _as_float(blurred)
 
     def _apply_moire(self, canvas: FloatImage, rng: np.random.Generator) -> FloatImage:
-        """Modulation is multiplicative because moiré modulates emitted light. An
-        additive pattern would lift the black regions that a real screen leaves black.
-        """
         cfg = self._config
         if cfg.moire_amplitude == 0.0:
             return canvas
@@ -202,10 +180,10 @@ class MoireRecaptureGenerator(AttackGenerator):
         along_grating = x_in_widths * math.cos(angle) + y_in_widths * math.sin(angle)
         across_grating = -x_in_widths * math.sin(angle) + y_in_widths * math.cos(angle)
 
-        frequency = cfg.moire_frequency * self._jitter(rng)
-        self._warn_if_unresolvable(frequency, width)
+        cycles_per_width = cfg.moire_cycles_per_width * self._jitter(rng)
+        self._warn_if_unresolvable(cycles_per_width, width)
 
-        channel_phases = np.arange(3) * cfg.moire_chroma_shift
+        channel_phases = np.arange(3) * cfg.moire_chroma_shift_rad
         pattern = np.zeros((height, width, 3), dtype=np.float64)
         weight_total = 0.0
         for axis, axis_weight in ((along_grating, 1.0), (across_grating, cfg.moire_cross_weight)):
@@ -214,35 +192,34 @@ class MoireRecaptureGenerator(AttackGenerator):
             for harmonic in range(1, cfg.moire_harmonics + 1):
                 amplitude = axis_weight / harmonic**MOIRE_HARMONIC_FALLOFF
                 phase = rng.uniform(0.0, 2.0 * math.pi)
-                carrier = 2.0 * math.pi * frequency * harmonic * axis + phase
+                carrier = 2.0 * math.pi * cycles_per_width * harmonic * axis + phase
                 pattern += amplitude * np.sin(carrier[..., None] + channel_phases)
                 weight_total += amplitude
 
         pattern /= weight_total
         beat_phase = rng.uniform(0.0, 2.0 * math.pi)
-        beat_envelope = 1.0 - MOIRE_BEAT_DEPTH * (
-            0.5 - 0.5 * np.sin(2.0 * math.pi * MOIRE_BEAT_FREQUENCY * across_grating + beat_phase)
-        )
+        beat_carrier = 2.0 * math.pi * MOIRE_BEAT_CYCLES_PER_WIDTH * across_grating + beat_phase
+        beat_envelope = 1.0 - MOIRE_BEAT_DEPTH * (0.5 - 0.5 * np.sin(beat_carrier))
         pattern *= beat_envelope[..., None]
         return canvas * (1.0 + cfg.moire_amplitude * pattern)
 
-    def _warn_if_unresolvable(self, frequency: float, width: int) -> None:
-        period_px = width / frequency
+    def _warn_if_unresolvable(self, cycles_per_width: float, width: int) -> None:
+        period_px = width / cycles_per_width
         if period_px >= MIN_RESOLVABLE_PERIOD_PX:
             return
         warnings.warn(
-            f"moire_frequency={frequency:.1f} yields a {period_px:.2f} px fringe period at "
-            f"width {width}px. Below {MIN_RESOLVABLE_PERIOD_PX} px the pattern aliases and no "
-            "longer represents the requested frequency: lower moire_frequency or work on "
-            "larger crops.",
+            f"moire_cycles_per_width={cycles_per_width:.1f} yields a {period_px:.2f} px fringe "
+            f"period at width {width}px. Below {MIN_RESOLVABLE_PERIOD_PX} px the pattern aliases "
+            "and no longer represents the requested frequency: lower moire_cycles_per_width or "
+            "work on larger crops.",
             RuntimeWarning,
             stacklevel=4,
         )
 
     def _apply_noise(self, canvas: FloatImage, rng: np.random.Generator) -> FloatImage:
-        if self._config.noise_sigma == 0.0:
+        if self._config.noise_sigma_levels == 0.0:
             return canvas
-        noise = rng.normal(0.0, self._config.noise_sigma / 255.0, canvas.shape)
+        noise = rng.normal(0.0, self._config.noise_sigma_levels / 255.0, canvas.shape)
         return canvas + noise
 
     def _jitter(self, rng: np.random.Generator) -> float:
@@ -256,21 +233,13 @@ def _as_float(array: Any) -> FloatImage:
 
 
 def _screen_blend(base: FloatImage, layer: FloatImage) -> FloatImage:
-    """Combine two normalised images so highlights saturate instead of clipping."""
     return _as_float(1.0 - (1.0 - base) * (1.0 - layer))
 
 
 def _quantise_to_uint8(canvas: FloatImage) -> RgbImage:
-    """Round rather than truncate: truncation would darken every generated sample by
-    half a level, a bias present in all of them.
-    """
     return np.rint(np.clip(canvas * 255.0, 0.0, 255.0)).astype(np.uint8)
 
 
 def _content_digest(image: RgbImage) -> int:
-    """Folded into the seed, this gives both properties at once: the same image always
-    yields the same attack, while different images get different moiré phases and
-    highlight positions.
-    """
     digest = hashlib.blake2b(image.tobytes(), digest_size=8).digest()
     return int.from_bytes(digest, "big")

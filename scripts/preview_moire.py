@@ -1,24 +1,3 @@
-#!/usr/bin/env python3
-"""Render a before/after view of the moiré recapture generator, for visual tuning.
-
-Two modes:
-
-* Pair (default) — the bona fide image beside its recapture.
-* Sweep (--sweep FIELD=START:STOP:STEPS) — a contact sheet walking one MoireConfig
-  field across a range with everything else held fixed, which is the fast way to
-  find a plausible value for a single artifact.
-
-With no --input, a synthetic test chart is used. Its zone plate makes moiré immediately
-visible, which is far more informative for tuning than a face, and it means the script
-runs before any dataset is in place.
-
-Examples:
-    uv run python scripts/preview_moire.py
-    uv run python scripts/preview_moire.py --input data/msu/real/001.png
-    uv run python scripts/preview_moire.py --sweep moire_frequency=8:70:8
-    uv run python scripts/preview_moire.py --moire-amplitude 0.2 --blur-sigma 1.4
-"""
-
 import argparse
 import dataclasses
 import math
@@ -31,58 +10,67 @@ import numpy as np
 from synthetic_pad.domain.image import RgbImage
 from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
 
+DESCRIPTION = "Render a before/after view of the moire recapture generator, for visual tuning."
+EPILOG = """examples:
+  uv run python scripts/preview_moire.py
+  uv run python scripts/preview_moire.py --input data/msu/real/001.png
+  uv run python scripts/preview_moire.py --sweep moire_cycles_per_width=8:70:8
+  uv run python scripts/preview_moire.py --moire-amplitude 0.2 --blur-sigma-px 1.4
+"""
+
 DEFAULT_OUTPUT = Path("results/moire_preview.png")
 DEFAULT_CHART_SIZE = 224
 LABEL_HEIGHT = 34
 GUTTER = 12
 BACKGROUND = 24
 
+ZONE_PLATE_SCALE = 0.30
+LOBE_SIGMA_AS_WIDTH_FRACTION = 0.16
+UPPER_BAND_FRACTION = 0.68
+COLOUR_BARS = (
+    (0.85, 0.20, 0.20),
+    (0.20, 0.80, 0.30),
+    (0.25, 0.35, 0.90),
+    (0.90, 0.85, 0.25),
+    (0.92, 0.92, 0.92),
+    (0.10, 0.10, 0.10),
+)
+
+
+def build_zone_plate(rows: Any, cols: Any, centre_y: float, centre_x: float, width: int) -> Any:
+    radius_sq = (rows - centre_y) ** 2 + (cols - centre_x) ** 2
+    return 0.5 + 0.5 * np.cos(radius_sq * (math.pi / (ZONE_PLATE_SCALE * width)))
+
+
+def build_smooth_lobe(rows: Any, cols: Any, centre_y: float, centre_x: float, width: int) -> Any:
+    sigma = width * LOBE_SIGMA_AS_WIDTH_FRACTION
+    return 0.30 + 0.55 * np.exp(
+        -0.5 * (((rows - centre_y) ** 2 + (cols - centre_x) ** 2) / sigma**2)
+    )
+
 
 def build_test_chart(size: int = DEFAULT_CHART_SIZE) -> RgbImage:
-    """Each region answers a different tuning question: the zone plate rises in
-    frequency with radius, so it beats against any sampling grid and shows exactly
-    where moiré sets in; the smooth lobe has no detail, so only the highlight and the
-    lens blur show there; the grey ramp reveals the contrast squeeze and the lifted
-    black; and the colour bars reveal the chromatic fringing.
-    """
     height = width = size
     rows, cols = np.mgrid[0:height, 0:width].astype(np.float64)
-    split = int(height * 0.68)
+    upper_band_end = int(height * UPPER_BAND_FRACTION)
     midline = width // 2
 
-    centre_y, centre_x = split / 2.0, midline / 2.0
-    radius_sq = (rows - centre_y) ** 2 + (cols - centre_x) ** 2
-    zone_plate = 0.5 + 0.5 * np.cos(radius_sq * (math.pi / (0.30 * width)))
-
-    lobe_y, lobe_x = split * 0.45, midline * 1.5
-    lobe_sigma = width * 0.16
-    lobe = 0.30 + 0.55 * np.exp(
-        -0.5 * (((rows - lobe_y) ** 2 + (cols - lobe_x) ** 2) / lobe_sigma**2)
-    )
-
-    ramp = np.linspace(0.0, 1.0, width, dtype=np.float64)
-    bars = np.array(
-        [
-            (0.85, 0.20, 0.20),
-            (0.20, 0.80, 0.30),
-            (0.25, 0.35, 0.90),
-            (0.90, 0.85, 0.25),
-            (0.92, 0.92, 0.92),
-            (0.10, 0.10, 0.10),
-        ]
-    )
-
     chart = np.zeros((height, width, 3), dtype=np.float64)
-    chart[:split, :midline] = zone_plate[:split, :midline, None]
-    chart[:split, midline:] = lobe[:split, midline:, None]
+    zone_plate = build_zone_plate(rows, cols, upper_band_end / 2.0, midline / 2.0, width)
+    smooth_lobe = build_smooth_lobe(rows, cols, upper_band_end * 0.45, midline * 1.5, width)
+    chart[:upper_band_end, :midline] = zone_plate[:upper_band_end, :midline, None]
+    chart[:upper_band_end, midline:] = smooth_lobe[:upper_band_end, midline:, None]
 
-    ramp_end = split + int((height - split) * 0.5)
-    chart[split:ramp_end] = ramp[None, :, None]
-    bar_width = width // len(bars)
-    for index, colour in enumerate(bars):
+    grey_ramp_end = upper_band_end + int((height - upper_band_end) * 0.5)
+    chart[upper_band_end:grey_ramp_end] = np.linspace(0.0, 1.0, width, dtype=np.float64)[
+        None, :, None
+    ]
+
+    bar_width = width // len(COLOUR_BARS)
+    for index, colour in enumerate(COLOUR_BARS):
         start = index * bar_width
-        stop = width if index == len(bars) - 1 else start + bar_width
-        chart[ramp_end:, start:stop] = colour
+        stop = width if index == len(COLOUR_BARS) - 1 else start + bar_width
+        chart[grey_ramp_end:, start:stop] = colour
 
     return (chart * 255.0).astype(np.uint8)
 
@@ -145,7 +133,9 @@ def parse_sweep(spec: str) -> tuple[str, list[float]]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+        description=DESCRIPTION,
+        epilog=EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--input", type=Path, help="bona fide image; omit to use the synthetic test chart"
@@ -159,9 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_CHART_SIZE,
         help=f"test chart side in pixels (default: {DEFAULT_CHART_SIZE}, ignored with --input)",
     )
-    parser.add_argument(
-        "--sweep", help="walk one field: FIELD=START:STOP:STEPS, e.g. moire_frequency=8:70:8"
-    )
+    parser.add_argument("--sweep", help="walk one field: FIELD=START:STOP:STEPS")
     parser.add_argument("--columns", type=int, default=3, help="panels per row in sweep mode")
 
     tuning = parser.add_argument_group("MoireConfig overrides")
@@ -204,7 +192,7 @@ def main() -> None:
     else:
         attack = MoireRecaptureGenerator(base_config).generate(source)
         sheet = contact_sheet(
-            [label_panel(source, f"bona fide  ({origin})"), label_panel(attack, "moiré recapture")],
+            [label_panel(source, f"bona fide  ({origin})"), label_panel(attack, "moire recapture")],
             columns=2,
         )
         summary = "before / after"
