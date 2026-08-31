@@ -18,6 +18,7 @@ EPILOG = """examples:
   uv run python scripts/preview_moire.py --moire-amplitude 0.2 --blur-sigma-px 1.4
 """
 
+DEFAULTS = MoireConfig()
 DEFAULT_OUTPUT = Path("results/moire_preview.png")
 DEFAULT_CHART_SIZE = 224
 LABEL_HEIGHT = 34
@@ -126,7 +127,7 @@ def parse_sweep(spec: str) -> tuple[str, list[float]]:
     start, stop, steps = float(parts[0]), float(parts[1]), int(parts[2])
     if steps < 2:
         raise ValueError(f"a sweep needs at least 2 steps, got {steps}")
-    is_integer_field = field_name == "moire_harmonics"
+    is_integer_field = isinstance(getattr(DEFAULTS, field_name), int)
     values = [start + (stop - start) * i / (steps - 1) for i in range(steps)]
     return field_name, [round(v) if is_integer_field else v for v in values]
 
@@ -153,12 +154,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--columns", type=int, default=3, help="panels per row in sweep mode")
 
     tuning = parser.add_argument_group("MoireConfig overrides")
-    defaults = MoireConfig()
     for field in dataclasses.fields(MoireConfig):
+        default = getattr(DEFAULTS, field.name)
         tuning.add_argument(
             f"--{field.name.replace('_', '-')}",
-            type=int if field.type is int else float,
-            help=f"default: {getattr(defaults, field.name)}",
+            type=type(default),
+            help=f"default: {default}",
         )
     return parser
 
