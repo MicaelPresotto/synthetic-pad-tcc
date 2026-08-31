@@ -10,14 +10,6 @@ import numpy as np
 from synthetic_pad.domain.image import RgbImage
 from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
 
-DESCRIPTION = "Render a before/after view of the moire recapture generator, for visual tuning."
-EPILOG = """examples:
-  uv run python scripts/preview_moire.py
-  uv run python scripts/preview_moire.py --input data/msu/real/001.png
-  uv run python scripts/preview_moire.py --sweep moire_cycles_per_width=8:70:8
-  uv run python scripts/preview_moire.py --moire-amplitude 0.2 --blur-sigma-px 1.4
-"""
-
 DEFAULTS = MoireConfig()
 DEFAULT_OUTPUT = Path("results/moire_preview.png")
 DEFAULT_CHART_SIZE = 224
@@ -145,9 +137,7 @@ def parse_sweep(spec: str) -> tuple[str, list[float]]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description=DESCRIPTION,
-        epilog=EPILOG,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Before/after view of the moire recapture generator, for visual tuning."
     )
     parser.add_argument(
         "--input", type=Path, help="bona fide image; omit to use the synthetic test chart"
