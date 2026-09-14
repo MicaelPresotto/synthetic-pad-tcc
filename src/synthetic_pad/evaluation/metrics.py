@@ -13,19 +13,51 @@ type FloatArray = np.ndarray[Any, np.dtype[np.floating[Any]]]
 
 def apcer(attack_scores: FloatArray, threshold: float) -> float:
     """Fraction of attacks that were accepted as genuine."""
-    raise NotImplementedError
+    _require_scores(attack_scores=attack_scores)
+    return float(np.mean(attack_scores < threshold))
 
 
 def bpcer(bonafide_scores: FloatArray, threshold: float) -> float:
     """Fraction of bona fide samples that were rejected."""
-    raise NotImplementedError
+    _require_scores(bonafide_scores=bonafide_scores)
+    return float(np.mean(bonafide_scores >= threshold))
 
 
 def acer(attack_scores: FloatArray, bonafide_scores: FloatArray, threshold: float) -> float:
     """Mean of APCER and BPCER at a given threshold."""
-    raise NotImplementedError
+    return (apcer(attack_scores, threshold) + bpcer(bonafide_scores, threshold)) / 2.0
 
 
 def eer(attack_scores: FloatArray, bonafide_scores: FloatArray) -> float:
     """Error rate at the threshold where APCER equals BPCER."""
-    raise NotImplementedError
+    apcer_at_each, bpcer_at_each = _operating_curve(attack_scores, bonafide_scores)
+    crossing = int(np.argmin(np.abs(apcer_at_each - bpcer_at_each)))
+    return float((apcer_at_each[crossing] + bpcer_at_each[crossing]) / 2.0)
+
+
+def auc(attack_scores: FloatArray, bonafide_scores: FloatArray) -> float:
+    """Area under the ROC curve, which no choice of threshold influences."""
+    apcer_at_each, bpcer_at_each = _operating_curve(attack_scores, bonafide_scores)
+    return float(np.trapezoid(1.0 - apcer_at_each, bpcer_at_each))
+
+
+def _operating_curve(
+    attack_scores: FloatArray, bonafide_scores: FloatArray
+) -> tuple[FloatArray, FloatArray]:
+    thresholds = _candidate_thresholds(attack_scores, bonafide_scores)
+    apcer_at_each = np.array([apcer(attack_scores, t) for t in thresholds])
+    bpcer_at_each = np.array([bpcer(bonafide_scores, t) for t in thresholds])
+    return apcer_at_each, bpcer_at_each
+
+
+def _candidate_thresholds(attack_scores: FloatArray, bonafide_scores: FloatArray) -> FloatArray:
+    _require_scores(attack_scores=attack_scores, bonafide_scores=bonafide_scores)
+    observed = np.unique(np.concatenate([attack_scores, bonafide_scores]))
+    rejects_nothing = np.array([np.inf])
+    return np.concatenate([rejects_nothing, observed[::-1]])
+
+
+def _require_scores(**fields: FloatArray) -> None:
+    for name, scores in fields.items():
+        if scores.size == 0:
+            raise ValueError(f"{name} must hold at least one score, got an empty array")

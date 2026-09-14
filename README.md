@@ -186,7 +186,7 @@ Dependabot opens weekly dependency updates.
 - [x] CI/CD pipeline and security gates
 - [x] Moiré / display recapture baseline
 - [ ] Liveness detector (judge)
-- [ ] Evaluation metrics
+- [x] Evaluation metrics
 - [ ] First end-to-end experiment
 - [ ] Diffusion-based generation
 - [ ] VLM-conditioned generation
