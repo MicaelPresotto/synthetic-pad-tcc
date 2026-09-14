@@ -1,7 +1,16 @@
 import numpy as np
 import pytest
 
-from synthetic_pad.evaluation.metrics import FloatArray, acer, apcer, auc, bpcer, eer
+from synthetic_pad.evaluation.metrics import (
+    FloatArray,
+    acer,
+    apcer,
+    auc,
+    bpcer,
+    eer,
+    eer_threshold,
+    hter,
+)
 
 
 def scores(*values: float) -> FloatArray:
@@ -63,6 +72,42 @@ class TestEer:
     def test_rejects_an_empty_array(self) -> None:
         with pytest.raises(ValueError, match="attack_scores"):
             eer(scores(), scores(0.5))
+
+
+class TestEerThreshold:
+    def test_lands_between_two_distributions_that_do_not_overlap(self) -> None:
+        threshold = eer_threshold(scores(0.7, 0.8, 0.9), scores(0.1, 0.2, 0.3))
+        assert 0.3 < threshold <= 0.7
+
+    def test_reproduces_the_equal_error_rate_it_was_derived_from(self) -> None:
+        attacks, bonafide = scores(0.3, 0.55, 0.6, 0.9), scores(0.1, 0.4, 0.5, 0.7)
+        assert acer(attacks, bonafide, eer_threshold(attacks, bonafide)) == eer(attacks, bonafide)
+
+
+class TestHter:
+    def test_collapses_onto_the_eer_when_the_development_set_is_the_evaluation_set(self) -> None:
+        attacks, bonafide = scores(0.3, 0.55, 0.6, 0.9), scores(0.1, 0.4, 0.5, 0.7)
+        assert hter(attacks, bonafide, attacks, bonafide) == eer(attacks, bonafide)
+
+    def test_holds_the_development_threshold_against_a_shifted_evaluation_set(self) -> None:
+        development_attacks, development_bonafide = scores(0.6, 0.7, 0.8), scores(0.1, 0.2, 0.3)
+        shifted_attacks, shifted_bonafide = scores(0.1, 0.2, 0.3), scores(0.6, 0.7, 0.8)
+        threshold = eer_threshold(development_attacks, development_bonafide)
+        assert hter(
+            development_attacks, development_bonafide, shifted_attacks, shifted_bonafide
+        ) == acer(shifted_attacks, shifted_bonafide, threshold)
+
+    def test_reaches_one_when_the_evaluation_set_inverts_the_development_set(self) -> None:
+        development_attacks, development_bonafide = scores(0.6, 0.7, 0.8), scores(0.1, 0.2, 0.3)
+        assert (
+            hter(
+                development_attacks,
+                development_bonafide,
+                scores(0.1, 0.2, 0.3),
+                scores(0.6, 0.7, 0.8),
+            )
+            == 1.0
+        )
 
 
 class TestAuc:
