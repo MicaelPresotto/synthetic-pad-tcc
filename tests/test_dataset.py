@@ -1,5 +1,6 @@
 import json
 from collections.abc import Mapping
+from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
@@ -140,7 +141,7 @@ class TestWriteManifest:
         attack_set = AttackSet(
             {"generator": "inverting"}, "data/msu/real", 224, [{"bona_fide": "a", "attack": "b"}]
         )
-        path = write_manifest(tmp_path, attack_set)
+        path = write_manifest(tmp_path, asdict(attack_set))
         assert json.loads(path.read_text()) == {
             "generator": {"generator": "inverting"},
             "source_directory": "data/msu/real",

@@ -1,4 +1,5 @@
 import argparse
+from dataclasses import asdict
 from pathlib import Path
 
 from synthetic_pad.dataset import WORKING_RESOLUTION, build_attack_set, write_manifest
@@ -26,7 +27,7 @@ def main() -> None:
     attack_set = build_attack_set(
         MoireRecaptureGenerator(), args.input, args.output, args.size, args.limit
     )
-    path = write_manifest(args.output, attack_set)
+    path = write_manifest(args.output, asdict(attack_set))
     print(f"wrote {len(attack_set.attacks)} attacks to {args.output}\nprovenance in {path}")
 
 

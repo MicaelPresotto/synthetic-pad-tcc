@@ -122,7 +122,24 @@ Metric definitions follow ISO/IEC 30107-3.
 
 ## Datasets
 
-Experiments use established face PAD datasets (MSU-MFSD, Replay-Attack) as the source of bona fide samples and as the real-attack reference for comparison.
+Experiments use two face PAD datasets, MSU-MFSD and Replay-Mobile, as the source of
+bona fide samples and as the real-attack reference. Both ship with per-frame face
+annotations, so crops are cut from the official boxes rather than from a detector of
+our own, which keeps the preprocessing comparable with published work. Each corpus
+keeps its official partitions: MSU-MFSD splits 15 training and 20 test subjects,
+Replay-Mobile 12 training, 16 development and 12 test subjects. Attacks are labelled
+by species, replay or print, because the generators here only simulate replay and
+ISO/IEC 30107-3 reports APCER per species.
+
+```bash
+uv run python scripts/extract_frames.py --corpus msu --root data/msu --output data/frames/msu
+uv run python scripts/extract_frames.py --corpus replay-mobile --root data/replay-mobile --output data/frames/replay-mobile
+```
+
+Each run samples evenly spaced frames from every video, cuts a square crop centred on
+the face and writes it losslessly as PNG, so that no compression artifact is mistaken
+for a recapture cue. A `manifest.json` next to the crops records the settings and the
+partition, subject, species, video and frame behind every crop.
 
 > **Note:** dataset files are not distributed in this repository. They are subject to their original licenses and must be obtained from their respective providers.
 
@@ -141,7 +158,9 @@ synthetic-pad/
 │   ├── generators/    # attack strategies
 │   ├── judge/         # liveness detectors
 │   ├── evaluation/    # metrics (APCER, BPCER, ACER, EER, HTER, AUC)
-│   └── dataset.py     # image I/O and batch attack generation
+│   ├── dataset.py     # image I/O and batch attack generation
+│   ├── corpora.py     # MSU-MFSD and Replay-Mobile readers: partitions, attack species, face boxes
+│   └── frames.py      # face crops sampled from the corpus videos
 ├── scripts/           # command line tools: visual tuning, batch generation
 ├── experiments/       # application layer: wires a generator to a judge
 ├── tests/             # mirrors src/

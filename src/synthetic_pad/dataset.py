@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -80,8 +80,8 @@ def build_attack_set(
     return AttackSet(dict(generator.describe()), str(source_directory), size, written)
 
 
-def write_manifest(output_directory: Path, attack_set: AttackSet) -> Path:
+def write_manifest(output_directory: Path, manifest: Mapping[str, object]) -> Path:
     path = output_directory / MANIFEST_NAME
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(asdict(attack_set), indent=2, sort_keys=True) + "\n")
+    path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     return path
