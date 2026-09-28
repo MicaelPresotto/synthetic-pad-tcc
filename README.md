@@ -98,6 +98,15 @@ possible. Parameters are tuned visually against a synthetic test chart or a real
 uv run python scripts/preview_moire.py --sweep moire_cycles_per_width=8:70:8
 ```
 
+Once the parameters are settled, one attack is rendered for every bona fide image in a
+folder. The run writes a `manifest.json` next to the attacks recording the exact generator
+settings and the source each attack came from, so a figure in the thesis traces back to
+the images and the parameters behind it.
+
+```bash
+uv run python scripts/generate_attacks.py --input data/msu/real --output data/msu/moire --limit 1000
+```
+
 ### Evaluation
 
 Attacks are scored by a liveness detector and evaluated using standard PAD metrics:
@@ -131,8 +140,9 @@ synthetic-pad/
 │   ├── domain/        # pure types + the generator/detector ports (no I/O)
 │   ├── generators/    # attack strategies
 │   ├── judge/         # liveness detectors
-│   └── evaluation/    # metrics (APCER, BPCER, ACER, EER, AUC)
-├── scripts/           # visual tuning tools for the generators
+│   ├── evaluation/    # metrics (APCER, BPCER, ACER, EER, HTER, AUC)
+│   └── dataset.py     # image I/O and batch attack generation
+├── scripts/           # command line tools: visual tuning, batch generation
 ├── experiments/       # application layer: wires a generator to a judge
 ├── tests/             # mirrors src/
 ├── data/              # datasets (gitignored)
