@@ -121,6 +121,12 @@ recapture leaves.
 uv run python scripts/train_judge.py --train-corpus msu --output results/judges/msu-real-seed1
 ```
 
+`--data` chooses the attacks the judge learns from, and is the variable the thesis
+measures: `real` uses the corpus's own, `synthetic` replaces them with one moire
+recapture rendered from each bona fide training crop, and `mixed` uses both. The
+development partition stays real in all three, so only the training data changes
+between them.
+
 Attacks are scored by a liveness detector and evaluated using standard PAD metrics:
 
 - **APCER** — Attack Presentation Classification Error Rate (attacks accepted as genuine)
