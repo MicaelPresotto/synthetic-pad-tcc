@@ -7,12 +7,17 @@ from typing import Any
 import cv2
 import numpy as np
 
+from synthetic_pad.dataset import (
+    WORKING_RESOLUTION,
+    fit_to_working_resolution,
+    read_image,
+    write_image,
+)
 from synthetic_pad.domain.image import RgbImage
 from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
 
 DEFAULTS = MoireConfig()
 DEFAULT_OUTPUT = Path("results/moire_preview.png")
-DEFAULT_CHART_SIZE = 224
 LABEL_HEIGHT = 34
 GUTTER = 12
 BACKGROUND = 24
@@ -42,7 +47,7 @@ def build_smooth_lobe(rows: Any, cols: Any, centre_y: float, centre_x: float, wi
     )
 
 
-def build_test_chart(size: int = DEFAULT_CHART_SIZE) -> RgbImage:
+def build_test_chart(size: int = WORKING_RESOLUTION) -> RgbImage:
     height = width = size
     rows, cols = np.mgrid[0:height, 0:width].astype(np.float64)
     upper_band_end = int(height * UPPER_BAND_FRACTION)
@@ -66,24 +71,6 @@ def build_test_chart(size: int = DEFAULT_CHART_SIZE) -> RgbImage:
         chart[grey_ramp_end:, start:stop] = colour
 
     return (chart * 255.0).astype(np.uint8)
-
-
-def load_image(path: Path) -> RgbImage:
-    raw = cv2.imread(str(path), cv2.IMREAD_COLOR)
-    if raw is None:
-        raise FileNotFoundError(f"could not read an image from {path}")
-    return np.asarray(cv2.cvtColor(raw, cv2.COLOR_BGR2RGB), dtype=np.uint8)
-
-
-def fit_to_working_resolution(image: RgbImage, size: int) -> RgbImage:
-    height, width = image.shape[:2]
-    scale = size / min(height, width)
-    resized = cv2.resize(
-        image, (round(width * scale), round(height * scale)), interpolation=cv2.INTER_AREA
-    )
-    top = (resized.shape[0] - size) // 2
-    left = (resized.shape[1] - size) // 2
-    return np.asarray(resized[top : top + size, left : left + size], dtype=np.uint8)
 
 
 def label_panel(image: RgbImage, text: str) -> RgbImage:
@@ -148,9 +135,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--size",
         type=int,
-        default=DEFAULT_CHART_SIZE,
+        default=WORKING_RESOLUTION,
         help="working resolution in pixels; --input is cropped and resized to it "
-        f"(default: {DEFAULT_CHART_SIZE})",
+        f"(default: {WORKING_RESOLUTION})",
     )
     parser.add_argument("--sweep", help="walk one field: FIELD=START:STOP:STEPS")
     parser.add_argument("--columns", type=int, default=3, help="panels per row in sweep mode")
@@ -179,7 +166,7 @@ def main() -> None:
     args = build_parser().parse_args()
     base_config = config_from_args(args)
     if args.input:
-        source = fit_to_working_resolution(load_image(args.input), args.size)
+        source = fit_to_working_resolution(read_image(args.input), args.size)
         origin = f"{args.input.name} at {args.size}px"
     else:
         source = build_test_chart(args.size)
@@ -204,8 +191,7 @@ def main() -> None:
         )
         summary = "before / after"
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    cv2.imwrite(str(args.output), cv2.cvtColor(sheet, cv2.COLOR_RGB2BGR))
+    write_image(args.output, sheet)
     print(f"{summary}\nwrote {args.output}  ({sheet.shape[1]}x{sheet.shape[0]})")
 
 
