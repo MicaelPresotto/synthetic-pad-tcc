@@ -47,6 +47,20 @@ MEANINGLESS_PARAMETERS = [
 ]
 
 
+def fringe_handedness(image: RgbImage) -> float:
+    gradient_y, gradient_x = np.gradient(image.astype(np.float64).mean(axis=2))
+    return float(np.mean(gradient_x * gradient_y))
+
+
+def variants_of(image: RgbImage, count: int) -> list[RgbImage]:
+    seeded = []
+    for index in range(count):
+        variant = image.copy()
+        variant[0, 0] = index % 256
+        seeded.append(variant)
+    return seeded
+
+
 def high_frequency_energy(image: RgbImage) -> float:
     grey = image.astype(np.float64).mean(axis=2)
     spectrum = np.abs(np.fft.fftshift(np.fft.fft2(grey)))
@@ -156,6 +170,47 @@ class TestArtifacts:
             [attack[0].ravel(), attack[-1].ravel(), attack[:, 0].ravel(), attack[:, -1].ravel()]
         )
         assert border.min() > 0
+
+
+class TestOrientationSymmetry:
+    def test_moire_leans_both_ways_across_images(self, face_like_image: RgbImage) -> None:
+        config = dataclasses.replace(NEUTRAL, moire_amplitude=0.25, variation=0.25)
+        generator = MoireRecaptureGenerator(config)
+        leans = {
+            fringe_handedness(generator.generate(variant)) > 0.0
+            for variant in variants_of(np.full_like(face_like_image, 128), 40)
+        }
+        assert leans == {True, False}
+
+    def test_rotation_turns_both_ways_across_images(self) -> None:
+        ramp = np.repeat(np.linspace(0, 255, 96, dtype=np.uint8)[None, :, None], 96, axis=0).repeat(
+            3, axis=2
+        )
+        config = dataclasses.replace(NEUTRAL, rotation_deg=6.0, variation=0.25)
+        generator = MoireRecaptureGenerator(config)
+        turns = {
+            float(
+                np.gradient(generator.generate(variant).astype(np.float64).mean(axis=2))[0].mean()
+            )
+            > 0.0
+            for variant in variants_of(ramp, 40)
+        }
+        assert turns == {True, False}
+
+    def test_a_still_configuration_pins_the_orientation(self, face_like_image: RgbImage) -> None:
+        config = dataclasses.replace(NEUTRAL, moire_amplitude=0.25, variation=0.0)
+        generator = MoireRecaptureGenerator(config)
+        leans = {
+            fringe_handedness(generator.generate(variant)) > 0.0
+            for variant in variants_of(np.full_like(face_like_image, 128), 20)
+        }
+        assert len(leans) == 1
+
+    def test_the_fringe_frequency_never_turns_negative(self, face_like_image: RgbImage) -> None:
+        config = dataclasses.replace(NEUTRAL, moire_amplitude=0.25, variation=0.9)
+        generator = MoireRecaptureGenerator(config)
+        for variant in variants_of(np.full_like(face_like_image, 128), 20):
+            assert high_frequency_energy(generator.generate(variant)) > 0.0
 
 
 class TestConfig:
