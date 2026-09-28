@@ -6,8 +6,11 @@ import pytest
 
 from synthetic_pad.corpora import BONA_FIDE, REPLAY, Recording
 from synthetic_pad.frames import (
+    CropSample,
     evenly_spaced,
     extract_corpus,
+    hold_out_subjects,
+    load_crops,
     readable_frame_count,
     sample_face_crops,
     square_face_crop,
@@ -122,3 +125,50 @@ class TestExtractCorpus:
         video = write_video(source / "real" / "clip.avi", frames=4)
         frame_set = extract_corpus([recording(video, 4)], source, tmp_path / "out", count, 16)
         assert len(list((tmp_path / "out").rglob("*.png"))) == len(frame_set.frames) == count
+
+
+def samples_for(subjects: range, partition: str = "train") -> list[CropSample]:
+    return [
+        CropSample(Path(f"{subject}_{frame}.png"), partition, f"{subject:03d}", BONA_FIDE)
+        for subject in subjects
+        for frame in range(3)
+    ]
+
+
+class TestLoadCrops:
+    def test_reads_back_what_extraction_wrote(self, tmp_path: Path) -> None:
+        from dataclasses import asdict
+
+        from synthetic_pad.dataset import write_manifest
+
+        source = tmp_path / "corpus"
+        video = write_video(source / "attack" / "clip.avi", frames=2)
+        frame_set = extract_corpus([recording(video, 2, REPLAY)], source, tmp_path / "out", 2, 16)
+        write_manifest(tmp_path / "out", asdict(frame_set))
+        crops = load_crops(tmp_path / "out")
+        assert [crop.image.name for crop in crops] == ["clip_f0000.png", "clip_f0001.png"]
+        assert all(crop.is_attack and crop.image.exists() for crop in crops)
+
+
+class TestHoldOutSubjects:
+    def test_moves_whole_subjects(self) -> None:
+        moved = hold_out_subjects(samples_for(range(10)), "train", "devel", count=3, seed=1)
+        held = {s.subject for s in moved if s.partition == "devel"}
+        kept = {s.subject for s in moved if s.partition == "train"}
+        assert len(held) == 3
+        assert not held & kept
+
+    def test_leaves_other_partitions_alone(self) -> None:
+        samples = samples_for(range(6)) + samples_for(range(10, 14), "test")
+        moved = hold_out_subjects(samples, "train", "devel", count=2, seed=1)
+        assert [s for s in moved if s.partition == "test"] == samples_for(range(10, 14), "test")
+
+    def test_is_reproducible_from_the_seed(self) -> None:
+        samples = samples_for(range(10))
+        assert hold_out_subjects(samples, "train", "devel", 3, seed=5) == hold_out_subjects(
+            samples, "train", "devel", 3, seed=5
+        )
+
+    def test_refuses_to_empty_the_partition(self) -> None:
+        with pytest.raises(ValueError, match="cannot hold out"):
+            hold_out_subjects(samples_for(range(3)), "train", "devel", count=3, seed=1)

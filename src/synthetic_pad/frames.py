@@ -1,18 +1,31 @@
 """Face crops sampled from PAD corpus videos, at the working resolution."""
 
+import json
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-from synthetic_pad.corpora import FaceBox, Recording
-from synthetic_pad.dataset import WORKING_RESOLUTION, write_image
+from synthetic_pad.corpora import BONA_FIDE, FaceBox, Recording
+from synthetic_pad.dataset import MANIFEST_NAME, WORKING_RESOLUTION, write_image
 from synthetic_pad.domain import RgbImage
 
 FRAMES_PER_VIDEO = 10
 FACE_CROP_SCALE = 1.4
+
+
+@dataclass(frozen=True, slots=True)
+class CropSample:
+    image: Path
+    partition: str
+    subject: str
+    species: str
+
+    @property
+    def is_attack(self) -> bool:
+        return self.species != BONA_FIDE
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,3 +122,29 @@ def extract_corpus(
             )
     corpus = recordings[0].corpus if recordings else ""
     return FrameSet(corpus, str(source_directory), count, size, scale, rows)
+
+
+def load_crops(frames_directory: Path) -> list[CropSample]:
+    manifest = json.loads((frames_directory / MANIFEST_NAME).read_text())
+    return [
+        CropSample(
+            frames_directory / row["image"], row["partition"], row["subject"], row["species"]
+        )
+        for row in manifest["frames"]
+    ]
+
+
+def hold_out_subjects(
+    samples: Sequence[CropSample], source: str, target: str, count: int, seed: int
+) -> list[CropSample]:
+    """Move `count` randomly chosen subjects of one partition into a new one, whole."""
+    subjects = sorted({sample.subject for sample in samples if sample.partition == source})
+    if not 0 < count < len(subjects):
+        raise ValueError(f"cannot hold out {count} of the {len(subjects)} subjects in {source!r}")
+    held = set(np.random.default_rng(seed).choice(subjects, size=count, replace=False).tolist())
+    return [
+        replace(sample, partition=target)
+        if sample.partition == source and sample.subject in held
+        else sample
+        for sample in samples
+    ]
