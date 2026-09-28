@@ -109,6 +109,18 @@ uv run python scripts/generate_attacks.py --input data/msu/real --output data/ms
 
 ### Evaluation
 
+The reference judge is an ImageNet-pretrained ResNet fine-tuned on the real crops of
+one corpus and tested on the test partitions of both, which gives the intra-dataset
+and the cross-dataset figure of the same model. MSU-MFSD has no development
+partition, so five of its fifteen training subjects are held out, whole and always
+the same five, to fix the decision threshold; Replay-Mobile uses its own. The only
+augmentation is a horizontal flip: colour jitter or blur would erase the very cues a
+recapture leaves.
+
+```bash
+uv run python scripts/train_judge.py --train-corpus msu --output results/judges/msu-real-seed1
+```
+
 Attacks are scored by a liveness detector and evaluated using standard PAD metrics:
 
 - **APCER** — Attack Presentation Classification Error Rate (attacks accepted as genuine)
@@ -156,8 +168,8 @@ synthetic-pad/
 ├── src/synthetic_pad/
 │   ├── domain/        # pure types + the generator/detector ports (no I/O)
 │   ├── generators/    # attack strategies
-│   ├── judge/         # liveness detectors
-│   ├── evaluation/    # metrics (APCER, BPCER, ACER, EER, HTER, AUC)
+│   ├── judge/         # liveness detectors (a fine-tuned ResNet)
+│   ├── evaluation/    # metrics (APCER, BPCER, ACER, EER, HTER, AUC) and the per-species report
 │   ├── dataset.py     # image I/O and batch attack generation
 │   ├── corpora.py     # MSU-MFSD and Replay-Mobile readers: partitions, attack species, face boxes
 │   └── frames.py      # face crops sampled from the corpus videos
