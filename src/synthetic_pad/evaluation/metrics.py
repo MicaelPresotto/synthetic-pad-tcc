@@ -36,9 +36,18 @@ def eer(attack_scores: FloatArray, bonafide_scores: FloatArray) -> float:
 
 
 def eer_threshold(attack_scores: FloatArray, bonafide_scores: FloatArray) -> float:
-    """Threshold at which APCER and BPCER meet."""
+    """Threshold at which APCER and BPCER meet.
+
+    When a whole interval of thresholds meets equally well, as it does whenever the two
+    classes separate perfectly, the midpoint of that interval is taken: the widest margin.
+    """
     thresholds, apcer_at_each, bpcer_at_each = _operating_curve(attack_scores, bonafide_scores)
-    return float(thresholds[_crossing(apcer_at_each, bpcer_at_each)])
+    gap = np.abs(apcer_at_each - bpcer_at_each)
+    tied = np.flatnonzero(gap == gap.min())
+    highest, lowest = tied[0], tied[-1]
+    if lowest + 1 == thresholds.size:
+        return float(thresholds[highest])
+    return float((thresholds[highest] + thresholds[lowest + 1]) / 2.0)
 
 
 def hter(

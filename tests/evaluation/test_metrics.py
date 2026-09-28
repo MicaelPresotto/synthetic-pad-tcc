@@ -75,9 +75,12 @@ class TestEer:
 
 
 class TestEerThreshold:
-    def test_lands_between_two_distributions_that_do_not_overlap(self) -> None:
-        threshold = eer_threshold(scores(0.7, 0.8, 0.9), scores(0.1, 0.2, 0.3))
-        assert 0.3 < threshold <= 0.7
+    def test_centres_itself_between_two_distributions_that_do_not_overlap(self) -> None:
+        assert eer_threshold(scores(0.7, 0.8, 0.9), scores(0.1, 0.2, 0.3)) == pytest.approx(0.5)
+
+    def test_centres_itself_in_the_equal_error_interval_when_the_classes_overlap(self) -> None:
+        attacks, bonafide = scores(0.2, 0.7, 0.8), scores(0.1, 0.3, 0.6)
+        assert eer_threshold(attacks, bonafide) == pytest.approx(0.45)
 
     def test_reproduces_the_equal_error_rate_it_was_derived_from(self) -> None:
         attacks, bonafide = scores(0.3, 0.55, 0.6, 0.9), scores(0.1, 0.4, 0.5, 0.7)
