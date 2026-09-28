@@ -90,9 +90,9 @@ class MoireRecaptureGenerator(AttackGenerator):
 
     def _apply_geometry(self, canvas: FloatImage, rng: np.random.Generator) -> FloatImage:
         cfg = self._config
-        tilt_x = cfg.tilt_x * self._jitter(rng)
-        tilt_y = cfg.tilt_y * self._jitter(rng)
-        roll = math.radians(cfg.rotation_deg * self._jitter(rng))
+        tilt_x = cfg.tilt_x * self._jitter_orientation(rng)
+        tilt_y = cfg.tilt_y * self._jitter_orientation(rng)
+        roll = math.radians(cfg.rotation_deg * self._jitter_orientation(rng))
         if tilt_x == 0.0 and tilt_y == 0.0 and roll == 0.0:
             return canvas
 
@@ -142,7 +142,7 @@ class MoireRecaptureGenerator(AttackGenerator):
         rows, cols = np.mgrid[0:height, 0:width].astype(np.float64)
         centre_x = rng.uniform(*GLARE_CENTRE_X_RANGE) * width
         centre_y = rng.uniform(*GLARE_CENTRE_Y_RANGE) * height
-        angle = math.radians(GLARE_ANGLE_DEG * self._jitter(rng))
+        angle = math.radians(GLARE_ANGLE_DEG * self._jitter_orientation(rng))
         offset_x, offset_y = cols - centre_x, rows - centre_y
         major = offset_x * math.cos(angle) + offset_y * math.sin(angle)
         minor = -offset_x * math.sin(angle) + offset_y * math.cos(angle)
@@ -169,11 +169,11 @@ class MoireRecaptureGenerator(AttackGenerator):
         height, width = canvas.shape[:2]
         rows, cols = np.mgrid[0:height, 0:width].astype(np.float64)
         x_in_widths, y_in_widths = cols / width, rows / width
-        angle = math.radians(cfg.moire_angle_deg * self._jitter(rng))
+        angle = math.radians(cfg.moire_angle_deg * self._jitter_orientation(rng))
         along_grating = x_in_widths * math.cos(angle) + y_in_widths * math.sin(angle)
         across_grating = -x_in_widths * math.sin(angle) + y_in_widths * math.cos(angle)
 
-        cycles_per_width = cfg.moire_cycles_per_width * self._jitter(rng)
+        cycles_per_width = cfg.moire_cycles_per_width * self._jitter_magnitude(rng)
         self._warn_if_unresolvable(cycles_per_width, width)
 
         channel_phases = np.arange(3) * cfg.moire_chroma_shift_rad
@@ -208,10 +208,16 @@ class MoireRecaptureGenerator(AttackGenerator):
         noise = rng.normal(0.0, self._config.noise_sigma_levels / 255.0, canvas.shape)
         return canvas + noise
 
-    def _jitter(self, rng: np.random.Generator) -> float:
+    def _jitter_magnitude(self, rng: np.random.Generator) -> float:
         if self._config.variation == 0.0:
             return 1.0
         return 1.0 + float(rng.uniform(-self._config.variation, self._config.variation))
+
+    def _jitter_orientation(self, rng: np.random.Generator) -> float:
+        if self._config.variation == 0.0:
+            return 1.0
+        handedness = 1.0 if rng.random() < 0.5 else -1.0
+        return handedness * self._jitter_magnitude(rng)
 
 
 def _as_float(array: Any) -> FloatImage:
