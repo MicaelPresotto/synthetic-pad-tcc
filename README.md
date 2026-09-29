@@ -127,6 +127,18 @@ recapture rendered from each bona fide training crop, and `mixed` uses both. The
 development partition stays real in all three, so only the training data changes
 between them.
 
+`explain_judge.py` shows where a trained judge looks. It computes Grad-CAM of the
+attack logit over the test crops of both corpora, split by species, together with one
+synthetic replay rendered from each bona fide test crop. It writes `attention.json`
+next to the run: the share of attention that falls on the face box and the mean map.
+With `--overlays N`, it also writes N heat-map examples per group. Grad-CAM keeps only
+evidence for an attack, so a crop judged plainly genuine has an empty map; those are
+counted rather than averaged in.
+
+```bash
+uv run python scripts/explain_judge.py --run results/judges/msu-real-seed1
+```
+
 Attacks are scored by a liveness detector and evaluated using standard PAD metrics:
 
 - **APCER** — Attack Presentation Classification Error Rate (attacks accepted as genuine)
@@ -175,11 +187,11 @@ synthetic-pad/
 ├── src/synthetic_pad/
 │   ├── domain/        # pure types + the generator/detector ports (no I/O)
 │   ├── generators/    # attack strategies
-│   ├── judge/         # liveness detectors (a fine-tuned ResNet)
+│   ├── judge/         # liveness detectors (a fine-tuned ResNet, with Grad-CAM)
 │   ├── evaluation/    # metrics (APCER, BPCER, ACER, EER, HTER, AUC) and the per-species report
 │   ├── dataset.py     # image I/O and batch attack generation
 │   ├── corpora.py     # MSU-MFSD and Replay-Mobile readers: partitions, attack species, face boxes
-│   └── frames.py      # face crops sampled from the corpus videos
+│   └── frames.py      # face crops sampled from the corpus videos, and their partitions
 ├── scripts/           # command line tools: visual tuning, batch generation
 ├── experiments/       # application layer: wires a generator to a judge
 ├── tests/             # mirrors src/
