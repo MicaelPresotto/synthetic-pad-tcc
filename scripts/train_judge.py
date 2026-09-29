@@ -1,12 +1,13 @@
 import argparse
 import json
 from collections import defaultdict
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
 import torch
 
+from synthetic_pad.calibration import read_fitted_config
 from synthetic_pad.evaluation.report import pad_report
 from synthetic_pad.frames import CORPORA, CropSample, load_partitions, read_crops, select
 from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
@@ -68,6 +69,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="real",
         help="attacks the judge trains on: the corpus's own, synthetic moire, or both",
     )
+    parser.add_argument(
+        "--generator-config",
+        type=Path,
+        help="fitted moire settings from calibrate_generator.py --fit; defaults otherwise",
+    )
     parser.add_argument("--frames", type=Path, default=Path("data/frames"))
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--architecture", choices=sorted(ARCHITECTURES), default="resnet18")
@@ -89,7 +95,8 @@ def main() -> None:
     partitions = load_partitions(args.frames)
     source = partitions[args.train_corpus]
     target_corpus = next(corpus for corpus in CORPORA if corpus != args.train_corpus)
-    generator = MoireRecaptureGenerator(MoireConfig(seed=args.seed))
+    fitted = read_fitted_config(args.generator_config) if args.generator_config else MoireConfig()
+    generator = MoireRecaptureGenerator(replace(fitted, seed=args.seed))
     images, is_attack = training_set(select(source, "train"), args.data, generator)
 
     detector, losses = train_resnet(images, is_attack, config, args.device)

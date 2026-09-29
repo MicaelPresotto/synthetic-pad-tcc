@@ -1,19 +1,34 @@
 """Image statistics for matching generated attacks to real ones."""
 
-from collections.abc import Sequence
+import json
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from itertools import pairwise
+from pathlib import Path
 from typing import Any
 
 import cv2
 import numpy as np
 
 from synthetic_pad.domain import LUMA_WEIGHTS, RgbImage, ensure_rgb_uint8
+from synthetic_pad.generators.moire import MoireConfig
 
 type BandPowers = np.ndarray[Any, np.dtype[np.float64]]
+type Crops = np.ndarray[Any, np.dtype[np.uint8]]
 
 BLACK_QUANTILE = 0.01
 WHITE_QUANTILE = 0.99
 CHROMA_BANDS = (4, 8, 12, 16, 24, 32, 48, 64, 80, 96, 112)
+LEVELS = ("black_level", "white_level")
+LEVEL_STEP = 0.05
+
+
+@dataclass(frozen=True, slots=True)
+class Appearance:
+    """Mean tone statistics and colour-fringe power of a set of crops."""
+
+    tone: Mapping[str, float]
+    chroma_power: BandPowers
 
 
 def tone_statistics(image: RgbImage) -> dict[str, float]:
@@ -49,3 +64,31 @@ def chroma_power(image: RgbImage, bands: Sequence[int] = CHROMA_BANDS) -> BandPo
     return np.array(
         [power[(radius >= low) & (radius < high)].mean() for low, high in pairwise(bands)]
     )
+
+
+def appearance(images: Crops) -> Appearance:
+    """Crops stacked as (N, H, W, 3)."""
+    tones = [tone_statistics(image) for image in images]
+    return Appearance(
+        {name: float(np.mean([tone[name] for tone in tones])) for name in tones[0]},
+        np.mean([chroma_power(image) for image in images], axis=0),
+    )
+
+
+def appearance_distance(generated: Appearance, real: Appearance) -> float:
+    """How far one set of crops looks from another, tone and colour weighted equally.
+
+    Levels differ in steps of LEVEL_STEP; every other statistic by its log ratio.
+    """
+    tone_gaps = [
+        (generated.tone[name] - real.tone[name]) / LEVEL_STEP
+        if name in LEVELS
+        else np.log(generated.tone[name] / real.tone[name])
+        for name in real.tone
+    ]
+    colour_gaps = np.log(generated.chroma_power / real.chroma_power)
+    return float((np.mean(np.square(tone_gaps)) + np.mean(np.square(colour_gaps))) / 2.0)
+
+
+def read_fitted_config(path: Path) -> MoireConfig:
+    return MoireConfig(**json.loads(path.read_text())["config"])
