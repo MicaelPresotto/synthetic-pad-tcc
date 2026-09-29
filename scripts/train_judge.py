@@ -10,6 +10,7 @@ import torch
 from synthetic_pad.dataset import read_image
 from synthetic_pad.evaluation.report import pad_report
 from synthetic_pad.frames import CropSample, hold_out_subjects, load_crops
+from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
 from synthetic_pad.judge.resnet import (
     ARCHITECTURES,
     Scores,
@@ -18,6 +19,7 @@ from synthetic_pad.judge.resnet import (
 )
 
 CORPORA = ("msu", "replay-mobile")
+TRAINING_DATA = ("real", "synthetic", "mixed")
 MSU_DEVELOPMENT_SUBJECTS = 5
 MSU_SPLIT_SEED = 20260928
 DEFAULTS = TrainingConfig()
@@ -42,6 +44,20 @@ def labels(samples: list[CropSample]) -> np.ndarray:
     return np.array([sample.is_attack for sample in samples])
 
 
+def training_set(
+    samples: list[CropSample], data: str, generator: MoireRecaptureGenerator
+) -> tuple[np.ndarray, np.ndarray]:
+    bona_fide = pixels([sample for sample in samples if not sample.is_attack])
+    attacks = []
+    if data in ("real", "mixed"):
+        attacks.append(pixels([sample for sample in samples if sample.is_attack]))
+    if data in ("synthetic", "mixed"):
+        attacks.append(np.stack([generator.generate(image) for image in bona_fide]))
+    images = np.concatenate([bona_fide, *attacks])
+    is_attack = np.arange(len(images)) >= len(bona_fide)
+    return images, is_attack
+
+
 def report_on(
     development: tuple[list[CropSample], Scores], evaluation: tuple[list[CropSample], Scores]
 ) -> dict[str, object]:
@@ -62,9 +78,15 @@ def report_on(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Train a ResNet judge on the real crops of one corpus; test it on both."
+        description="Train a ResNet judge on the crops of one corpus; test it on both."
     )
     parser.add_argument("--train-corpus", choices=CORPORA, required=True)
+    parser.add_argument(
+        "--data",
+        choices=TRAINING_DATA,
+        default="real",
+        help="attacks the judge trains on: the corpus's own, synthetic moire, or both",
+    )
     parser.add_argument("--frames", type=Path, default=Path("data/frames"))
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--architecture", choices=sorted(ARCHITECTURES), default="resnet18")
@@ -86,9 +108,10 @@ def main() -> None:
     partitions = load_partitions(args.frames)
     source = partitions[args.train_corpus]
     target_corpus = next(corpus for corpus in CORPORA if corpus != args.train_corpus)
-    training = select(source, "train")
+    generator = MoireRecaptureGenerator(MoireConfig(seed=args.seed))
+    images, is_attack = training_set(select(source, "train"), args.data, generator)
 
-    detector, losses = train_resnet(pixels(training), labels(training), config, args.device)
+    detector, losses = train_resnet(images, is_attack, config, args.device)
     detector.save(args.output / "judge.pt")
 
     scored: dict[str, tuple[list[CropSample], Scores]] = {}
@@ -102,12 +125,14 @@ def main() -> None:
     report = {
         "training": {
             "corpus": args.train_corpus,
-            "data": "real",
+            "data": args.data,
+            "generator": dict(generator.describe()) if args.data != "real" else None,
             "config": asdict(config),
             "device": args.device,
             "torch": torch.__version__,
             "epoch_losses": losses,
-            "crops": len(training),
+            "bona_fide_crops": int(np.sum(~is_attack)),
+            "attack_crops": int(np.sum(is_attack)),
             "msu_development_subjects": sorted(
                 {s.subject for s in partitions["msu"] if s.partition == "devel"}
             ),
