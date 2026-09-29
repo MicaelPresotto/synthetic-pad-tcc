@@ -16,10 +16,12 @@ from synthetic_pad.domain.validation import require_positive
 type Batch = np.ndarray[Any, np.dtype[np.uint8]]
 type Labels = np.ndarray[Any, np.dtype[np.bool_]]
 type Scores = np.ndarray[Any, np.dtype[np.float64]]
+type AttentionMaps = np.ndarray[Any, np.dtype[np.float64]]
 
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 SCORING_BATCH = 128
+LAST_RESIDUAL_STAGE = "layer4"
 
 ARCHITECTURES: dict[str, tuple[Callable[..., models.ResNet], models.WeightsEnum]] = {
     "resnet18": (models.resnet18, models.ResNet18_Weights.IMAGENET1K_V1),
@@ -66,6 +68,29 @@ class ResNetLivenessDetector(LivenessDetector):
                 )
                 scores.append(torch.sigmoid(logits.squeeze(1)).cpu().numpy())
         return np.concatenate(scores).astype(np.float64)
+
+    def grad_cam(self, images: Batch) -> AttentionMaps:
+        """Grad-CAM (Selvaraju et al., 2017) of the attack logit at the last residual stage.
+
+        One non-negative map per image, at that stage's resolution: 7 x 7 for a 224 px crop.
+        """
+        captured: list[torch.Tensor] = []
+        stage = self._model.get_submodule(LAST_RESIDUAL_STAGE)
+        hook = stage.register_forward_hook(lambda _module, _inputs, out: captured.append(out))
+        maps = []
+        try:
+            for start in range(0, len(images), SCORING_BATCH):
+                logits = self._model(
+                    _to_tensor(images[start : start + SCORING_BATCH], self._device)
+                )
+                activations = captured.pop()
+                (gradients,) = torch.autograd.grad(logits.sum(), activations)
+                channel_weights = gradients.mean(dim=(2, 3), keepdim=True)
+                cam = torch.relu((channel_weights * activations).sum(dim=1))
+                maps.append(cam.detach().cpu().numpy())
+        finally:
+            hook.remove()
+        return np.concatenate(maps).astype(np.float64)
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)

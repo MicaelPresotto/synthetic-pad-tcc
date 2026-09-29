@@ -9,11 +9,14 @@ import cv2
 import numpy as np
 
 from synthetic_pad.corpora import BONA_FIDE, FaceBox, Recording
-from synthetic_pad.dataset import MANIFEST_NAME, WORKING_RESOLUTION, write_image
+from synthetic_pad.dataset import MANIFEST_NAME, WORKING_RESOLUTION, read_image, write_image
 from synthetic_pad.domain import RgbImage
 
 FRAMES_PER_VIDEO = 10
 FACE_CROP_SCALE = 1.4
+CORPORA = ("msu", "replay-mobile")
+MSU_DEVELOPMENT_SUBJECTS = 5
+MSU_SPLIT_SEED = 20260928
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,3 +151,20 @@ def hold_out_subjects(
         else sample
         for sample in samples
     ]
+
+
+def load_partitions(frames_root: Path) -> dict[str, list[CropSample]]:
+    """Crops of every corpus; MSU-MFSD has no development partition, so five of its
+    training subjects are held out as one."""
+    msu = hold_out_subjects(
+        load_crops(frames_root / "msu"), "train", "devel", MSU_DEVELOPMENT_SUBJECTS, MSU_SPLIT_SEED
+    )
+    return {"msu": msu, "replay-mobile": load_crops(frames_root / "replay-mobile")}
+
+
+def select(samples: Sequence[CropSample], partition: str) -> list[CropSample]:
+    return [sample for sample in samples if sample.partition == partition]
+
+
+def read_crops(samples: Sequence[CropSample]) -> np.ndarray:
+    return np.stack([read_image(sample.image) for sample in samples])

@@ -2,9 +2,15 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 
 from synthetic_pad.evaluation.metrics import auc
-from synthetic_pad.judge.resnet import ResNetLivenessDetector, TrainingConfig, train_resnet
+from synthetic_pad.judge.resnet import (
+    ResNetLivenessDetector,
+    TrainingConfig,
+    build_model,
+    train_resnet,
+)
 
 TINY = TrainingConfig(pretrained=False, epochs=6, batch_size=8, learning_rate=1e-3)
 
@@ -70,3 +76,44 @@ class TestResNetLivenessDetector:
         trained[0].save(tmp_path / "judge.pt")
         reloaded = ResNetLivenessDetector.load(tmp_path / "judge.pt", device="cpu")
         np.testing.assert_allclose(reloaded.score_batch(images), trained[0].score_batch(images))
+
+
+class TestGradCam:
+    def test_gives_one_map_per_image_at_the_last_stage_resolution(
+        self, trained: tuple[ResNetLivenessDetector, list[float]]
+    ) -> None:
+        assert trained[0].grad_cam(separable_set(count=5, size=64)[0]).shape == (5, 2, 2)
+
+    def test_maps_are_never_negative(
+        self, trained: tuple[ResNetLivenessDetector, list[float]]
+    ) -> None:
+        assert trained[0].grad_cam(separable_set(size=64)[0]).min() >= 0.0
+
+    def test_leaves_the_scores_untouched(
+        self, trained: tuple[ResNetLivenessDetector, list[float]]
+    ) -> None:
+        images = separable_set()[0]
+        before = trained[0].score_batch(images)
+        trained[0].grad_cam(images)
+        np.testing.assert_array_equal(trained[0].score_batch(images), before)
+
+    def test_reduces_to_the_class_activation_map_of_a_global_average_pooled_network(
+        self,
+    ) -> None:
+        torch.manual_seed(0)
+        model = build_model("resnet18", pretrained=False)
+        detector = ResNetLivenessDetector(model, "resnet18", device="cpu")
+        images = separable_set(count=4, size=96)[0]
+        captured: list[torch.Tensor] = []
+        hook = model.get_submodule("layer4").register_forward_hook(
+            lambda _module, _inputs, out: captured.append(out.detach())
+        )
+        detector.score_batch(images)
+        hook.remove()
+        (activations,) = captured
+        classifier_weights = model.state_dict()["fc.weight"][0]
+        pooled_area = activations.shape[2] * activations.shape[3]
+        expected = torch.relu(torch.einsum("c,nchw->nhw", classifier_weights, activations))
+        np.testing.assert_allclose(
+            detector.grad_cam(images), expected.numpy() / pooled_area, rtol=1e-4, atol=1e-8
+        )

@@ -7,9 +7,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from synthetic_pad.dataset import read_image
 from synthetic_pad.evaluation.report import pad_report
-from synthetic_pad.frames import CropSample, hold_out_subjects, load_crops
+from synthetic_pad.frames import CORPORA, CropSample, load_partitions, read_crops, select
 from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
 from synthetic_pad.judge.resnet import (
     ARCHITECTURES,
@@ -18,26 +17,8 @@ from synthetic_pad.judge.resnet import (
     train_resnet,
 )
 
-CORPORA = ("msu", "replay-mobile")
 TRAINING_DATA = ("real", "synthetic", "mixed")
-MSU_DEVELOPMENT_SUBJECTS = 5
-MSU_SPLIT_SEED = 20260928
 DEFAULTS = TrainingConfig()
-
-
-def load_partitions(frames_root: Path) -> dict[str, list[CropSample]]:
-    msu = hold_out_subjects(
-        load_crops(frames_root / "msu"), "train", "devel", MSU_DEVELOPMENT_SUBJECTS, MSU_SPLIT_SEED
-    )
-    return {"msu": msu, "replay-mobile": load_crops(frames_root / "replay-mobile")}
-
-
-def select(samples: list[CropSample], partition: str) -> list[CropSample]:
-    return [sample for sample in samples if sample.partition == partition]
-
-
-def pixels(samples: list[CropSample]) -> np.ndarray:
-    return np.stack([read_image(sample.image) for sample in samples])
 
 
 def labels(samples: list[CropSample]) -> np.ndarray:
@@ -47,10 +28,10 @@ def labels(samples: list[CropSample]) -> np.ndarray:
 def training_set(
     samples: list[CropSample], data: str, generator: MoireRecaptureGenerator
 ) -> tuple[np.ndarray, np.ndarray]:
-    bona_fide = pixels([sample for sample in samples if not sample.is_attack])
+    bona_fide = read_crops([sample for sample in samples if not sample.is_attack])
     attacks = []
     if data in ("real", "mixed"):
-        attacks.append(pixels([sample for sample in samples if sample.is_attack]))
+        attacks.append(read_crops([sample for sample in samples if sample.is_attack]))
     if data in ("synthetic", "mixed"):
         attacks.append(np.stack([generator.generate(image) for image in bona_fide]))
     images = np.concatenate([bona_fide, *attacks])
@@ -120,7 +101,7 @@ def main() -> None:
         ("intra", select(source, "test")),
         ("cross", select(partitions[target_corpus], "test")),
     ):
-        scored[name] = (samples, detector.score_batch(pixels(samples)))
+        scored[name] = (samples, detector.score_batch(read_crops(samples)))
 
     report = {
         "training": {
