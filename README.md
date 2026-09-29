@@ -127,7 +127,8 @@ Attacks are scored by a liveness detector and evaluated using standard PAD metri
 - **BPCER** — Bona Fide Presentation Classification Error Rate (genuine samples rejected)
 - **ACER** — Average Classification Error Rate
 - **EER** — Equal Error Rate
-- **HTER** — Half Total Error Rate, at a threshold fixed on a development set
+- **HTER** — Half Total Error Rate, at a threshold fixed on a development set; when a
+  whole interval of thresholds equalises the two error rates there, its midpoint
 - **AUC** — threshold-independent measure of separability
 
 Metric definitions follow ISO/IEC 30107-3.
