@@ -7,11 +7,10 @@ from typing import Any
 import cv2
 import numpy as np
 
-from synthetic_pad.domain import RgbImage, ensure_rgb_uint8
+from synthetic_pad.domain import LUMA_WEIGHTS, RgbImage, ensure_rgb_uint8
 
 type BandPowers = np.ndarray[Any, np.dtype[np.float64]]
 
-LUMA_WEIGHTS = np.array([0.299, 0.587, 0.114])
 BLACK_QUANTILE = 0.01
 WHITE_QUANTILE = 0.99
 CHROMA_BANDS = (4, 8, 12, 16, 24, 32, 48, 64, 80, 96, 112)
@@ -19,7 +18,7 @@ CHROMA_BANDS = (4, 8, 12, 16, 24, 32, 48, 64, 80, 96, 112)
 
 def tone_statistics(image: RgbImage) -> dict[str, float]:
     """Saturation, contrast, black and white levels in [0, 1]; sharpness as the variance
-    of the Laplacian of luma (ITU-R BT.601 weights)."""
+    of the Laplacian of luma."""
     ensure_rgb_uint8(image)
     unit = image.astype(np.float64) / 255.0
     luma = unit @ LUMA_WEIGHTS
