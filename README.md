@@ -145,13 +145,16 @@ uv run python scripts/generate_attacks.py --input data/msu/real --output data/ms
 
 ### Evaluation
 
-The reference judge is an ImageNet-pretrained ResNet fine-tuned on the real crops of
+The reference judge is an ImageNet-pretrained ResNet-18 fine-tuned on the real crops of
 one corpus and tested on the test partitions of both, which gives the intra-dataset
 and the cross-dataset figure of the same model. MSU-MFSD has no development
 partition, so five of its fifteen training subjects are held out, whole and always
 the same five, to fix the decision threshold; Replay-Mobile uses its own. The only
 augmentation is a horizontal flip: colour jitter or blur would erase the very cues a
-recapture leaves.
+recapture leaves. `--architecture` swaps the backbone for a ResNet-50 or a ViT-B/16 or
+ViT-B/32, under the same training settings, to check that a result does not belong to
+one architecture alone; Grad-CAM needs a convolutional stage and is offered for the
+ResNets only.
 
 ```bash
 uv run python scripts/train_judge.py --train-corpus msu --output results/judges/msu-real-seed1
@@ -223,7 +226,7 @@ synthetic-pad/
 ├── src/synthetic_pad/
 │   ├── domain/        # pure types + the generator/detector ports (no I/O)
 │   ├── generators/    # attack strategies
-│   ├── judge/         # liveness detectors (a fine-tuned ResNet, with Grad-CAM)
+│   ├── judge/         # liveness detectors (a fine-tuned ResNet or ViT, Grad-CAM for ResNets)
 │   ├── evaluation/    # metrics (APCER, BPCER, ACER, EER, HTER, AUC) and the per-species report
 │   ├── dataset.py     # image I/O and batch attack generation
 │   ├── calibration.py # image statistics that match generated attacks to real ones
