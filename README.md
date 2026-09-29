@@ -121,6 +121,19 @@ desaturated, flattened and blurred, and they concentrated their fringes at 20 cy
 calibrated defaults follow the MSU-MFSD replays closely across every band and land between
 the two corpora on tone.
 
+Hand-tuning against a report that covers both corpora leaks the test corpus into a
+cross-dataset experiment. `--fit` therefore calibrates on one corpus alone: a random
+search draws tone, blur, noise and fringe settings and keeps the one whose attacks sit
+closest to that corpus's training replays. Tone and colour count equally in that
+distance. The fringe band may move but keeps its width, because a single frequency can
+match the mean statistics and is exactly the shortcut a judge learns. Each fit lives in
+`experiments/`, and `train_judge.py --generator-config` trains on it, so a judge trained on
+one corpus uses a generator that has only ever seen that corpus.
+
+```bash
+uv run python scripts/calibrate_generator.py --fit replay-mobile --trials 250 --output experiments/moire-fitted-to-replay-mobile.json
+```
+
 Once the parameters are settled, one attack is rendered for every bona fide image in a
 folder. The run writes a `manifest.json` next to the attacks recording the exact generator
 settings and the source each attack came from, so a figure in the thesis traces back to
@@ -217,7 +230,7 @@ synthetic-pad/
 │   ├── corpora.py     # MSU-MFSD and Replay-Mobile readers: partitions, attack species, face boxes
 │   └── frames.py      # face crops sampled from the corpus videos, and their partitions
 ├── scripts/           # command line tools: visual tuning, batch generation
-├── experiments/       # application layer: wires a generator to a judge
+├── experiments/       # generator settings fitted to one corpus each
 ├── tests/             # mirrors src/
 ├── data/              # datasets (gitignored)
 └── results/           # experiment outputs (gitignored)
