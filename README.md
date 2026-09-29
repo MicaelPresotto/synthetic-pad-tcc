@@ -98,6 +98,17 @@ possible. Parameters are tuned visually against a synthetic test chart or a real
 uv run python scripts/preview_moire.py --sweep moire_cycles_per_width=8:70:8
 ```
 
+The eye is not the final judge of a parameter. `calibrate_generator.py` measures, on the
+training partition of each corpus, how the real replay and print crops differ from the
+bona fide ones: saturation, contrast, black and white levels, sharpness, and the power
+of the colour fringes in bands of cycles per width. It then measures the same on attacks
+rendered from those bona fide crops. A generated attack is calibrated when its ratios
+to bona fide match the real replay's. Test partitions never take part.
+
+```bash
+uv run python scripts/calibrate_generator.py
+```
+
 Once the parameters are settled, one attack is rendered for every bona fide image in a
 folder. The run writes a `manifest.json` next to the attacks recording the exact generator
 settings and the source each attack came from, so a figure in the thesis traces back to
@@ -190,6 +201,7 @@ synthetic-pad/
 │   ├── judge/         # liveness detectors (a fine-tuned ResNet, with Grad-CAM)
 │   ├── evaluation/    # metrics (APCER, BPCER, ACER, EER, HTER, AUC) and the per-species report
 │   ├── dataset.py     # image I/O and batch attack generation
+│   ├── calibration.py # image statistics that match generated attacks to real ones
 │   ├── corpora.py     # MSU-MFSD and Replay-Mobile readers: partitions, attack species, face boxes
 │   └── frames.py      # face crops sampled from the corpus videos, and their partitions
 ├── scripts/           # command line tools: visual tuning, batch generation
