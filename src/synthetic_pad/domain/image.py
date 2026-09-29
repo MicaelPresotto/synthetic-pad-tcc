@@ -6,6 +6,9 @@ import numpy as np
 
 type RgbImage = np.ndarray[Any, np.dtype[np.uint8]]
 
+LUMA_WEIGHTS = np.array([0.299, 0.587, 0.114])
+"""ITU-R BT.601 weights that turn RGB into perceived brightness."""
+
 
 def ensure_rgb_uint8(image: np.ndarray[Any, Any]) -> RgbImage:
     if image.ndim != 3 or image.shape[2] != 3:

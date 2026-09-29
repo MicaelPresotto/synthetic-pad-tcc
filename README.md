@@ -48,11 +48,11 @@ changes the result:
 | # | Stage | What it models | Parameters |
 |---|---|---|---|
 | 1 | Geometry | The camera is never square-on to the screen, so the image arrives keystoned and slightly rolled | `tilt_x`, `tilt_y` (fractions of the perpendicular dimension), `rotation_deg` |
-| 2 | Tone | The panel cannot emit true black and the camera clips the highlights, so contrast and dynamic range both shrink | `contrast`, `black_level`, `white_level` |
+| 2 | Tone | The panel's tone curve and gamut replace the scene's: real replays come out more saturated and, on MSU-MFSD, contrastier than the bona fide captures | `contrast`, `saturation`, `black_level`, `white_level` |
 | 3 | Glare | A light source in the room mirrored on the screen glass | `glare_intensity`, `glare_extent` (fraction of the image width) |
-| 4 | Lens | Defocus and the finite pixel fill factor soften everything | `blur_sigma_px` |
-| 5 | Moiré | The screen's pixel grid beating against the sensor's | `moire_amplitude`, `moire_cycles_per_width`, `moire_angle_deg`, `moire_chroma_shift_rad`, `moire_cross_weight` |
-| 6 | Noise | Sensor read noise on a dim, indirect subject | `noise_sigma_levels` |
+| 4 | Lens | Defocus and the finite pixel fill factor; off by default, since real replays measure sharper than bona fide | `blur_sigma_px` |
+| 5 | Moiré | The screen's pixel grid beating against the sensor's | `moire_amplitude`, `moire_min_cycles_per_width`, `moire_max_cycles_per_width`, `moire_max_angle_deg`, `moire_chroma_shift_rad`, `moire_cross_weight` |
+| 6 | Noise | Sensor read noise on a dim, indirect subject, in brightness only: video codecs keep colour at a quarter of the resolution, which smooths colour noise away | `noise_sigma_levels` |
 
 The ordering is load-bearing. Glare lies on the glass, physically in front of the lens,
 so stage 4 blurs it — a crisp highlight would read as a sticker rather than a
@@ -66,12 +66,14 @@ sampling grids that almost agree — say screen pixels every 0.100 mm, sampled b
 sensor every 0.104 mm. The alignment error accumulates and resets, producing a pattern
 roughly 25 samples wide out of two grids 0.1 mm apart. The visible interference is far
 coarser than either grid, and the grids themselves are finer than a single output
-pixel, so the beat is synthesised directly. `moire_cycles_per_width` is therefore measured in
+pixel, so the beat is synthesised directly. Its frequency is therefore measured in
 cycles across the image width, which holds the appearance stable across resolutions;
-below a two-pixel fringe period the parameter stops describing the output and the
-generator warns. Every other parameter carries its unit in its own name. The default of 20 cycles — an 11 px fringe at the 224 px working
-resolution — was picked from the sweep below, and the ±25% per-image jitter keeps the
-whole range inside the band that still reads as moiré rather than as fine dither.
+below a two-pixel fringe period it stops describing the output and the generator warns.
+Every other parameter carries its unit in its own name. Each attack draws its frequency
+from `moire_min_cycles_per_width` to `moire_max_cycles_per_width` on a logarithmic scale,
+and its angle from anywhere within `moire_max_angle_deg` of upright. A generator with a
+single frequency and angle gave every attack the same fringe, and a judge trained on those
+attacks learned that fringe and nothing else.
 
 **The modulation is multiplicative.** Moiré modulates emitted light, so a black region,
 where the panel emits nothing, has nothing to modulate and stays black. An additive
@@ -95,7 +97,7 @@ identity function — which is what makes an ablation over the individual artifa
 possible. Parameters are tuned visually against a synthetic test chart or a real face:
 
 ```bash
-uv run python scripts/preview_moire.py --sweep moire_cycles_per_width=8:70:8
+uv run python scripts/preview_moire.py --sweep saturation=0.8:1.6:5
 ```
 
 The eye is not the final judge of a parameter. `calibrate_generator.py` measures, on the
@@ -108,6 +110,16 @@ to bona fide match the real replay's. Test partitions never take part.
 ```bash
 uv run python scripts/calibrate_generator.py
 ```
+
+The defaults come from that report. Against bona fide, the real replays of both corpora
+are more saturated (×1.15 to ×1.27) and sharper (×1.26 to ×1.32). Their contrast rises on
+MSU-MFSD (×1.51) and barely moves on Replay-Mobile (×1.04). Most of their extra colour
+power follows from those tone changes alone. What is left is an excess below 16 cycles
+per width on MSU-MFSD, which is where the moiré belongs, and none on Replay-Mobile, which
+replays on a matte screen. The first defaults did the opposite on every count: they
+desaturated, flattened and blurred, and they concentrated their fringes at 20 cycles. The
+calibrated defaults follow the MSU-MFSD replays closely across every band and land between
+the two corpora on tone.
 
 Once the parameters are settled, one attack is rendered for every bona fide image in a
 folder. The run writes a `manifest.json` next to the attacks recording the exact generator

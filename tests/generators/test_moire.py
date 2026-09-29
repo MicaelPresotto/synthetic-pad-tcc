@@ -13,6 +13,7 @@ NEUTRAL = MoireConfig(
     tilt_y=0.0,
     rotation_deg=0.0,
     contrast=1.0,
+    saturation=1.0,
     black_level=0.0,
     white_level=1.0,
     glare_intensity=0.0,
@@ -27,6 +28,7 @@ EVERY_STAGE = [
     {"tilt_y": 0.08},
     {"rotation_deg": 2.0},
     {"contrast": 0.7},
+    {"saturation": 1.5},
     {"black_level": 0.1},
     {"white_level": 0.85},
     {"glare_intensity": 0.3},
@@ -38,13 +40,33 @@ EVERY_STAGE = [
 MEANINGLESS_PARAMETERS = [
     ({"black_level": 0.9, "white_level": 0.5}, "black_level < white_level"),
     ({"contrast": 0.0}, "contrast must be positive"),
-    ({"moire_cycles_per_width": 0.0}, "moire_cycles_per_width must be positive"),
+    ({"moire_min_cycles_per_width": 0.0}, "moire_min_cycles_per_width must be positive"),
+    (
+        {"moire_min_cycles_per_width": 40.0, "moire_max_cycles_per_width": 20.0},
+        "moire_min_cycles_per_width <= moire_max_cycles_per_width",
+    ),
+    ({"moire_max_angle_deg": -5.0}, "non-negative"),
+    ({"saturation": -0.5}, "non-negative"),
     ({"moire_amplitude": -0.1}, "non-negative"),
     ({"noise_sigma_levels": -1.0}, "non-negative"),
     ({"glare_intensity": 2.0}, r"\[0, 1\]"),
     ({"glare_extent": 0.0}, "must be positive"),
     ({"moire_cross_weight": -0.5}, "non-negative"),
 ]
+
+
+def at_fixed_frequency(config: MoireConfig, cycles_per_width: float) -> MoireConfig:
+    return dataclasses.replace(
+        config,
+        moire_min_cycles_per_width=cycles_per_width,
+        moire_max_cycles_per_width=cycles_per_width,
+    )
+
+
+def upright_fringe_frequency(image: RgbImage) -> int:
+    row = image[0].astype(np.float64).mean(axis=1)
+    spectrum = np.abs(np.fft.rfft(row - row.mean()))
+    return int(np.argmax(spectrum))
 
 
 def fringe_handedness(image: RgbImage) -> float:
@@ -120,7 +142,7 @@ class TestArtifacts:
 
     def test_moire_adds_high_frequency_energy(self, face_like_image: RgbImage) -> None:
         without = MoireRecaptureGenerator(NEUTRAL).generate(face_like_image)
-        config = dataclasses.replace(NEUTRAL, moire_amplitude=0.2, moire_cycles_per_width=60.0)
+        config = at_fixed_frequency(dataclasses.replace(NEUTRAL, moire_amplitude=0.2), 60.0)
         with_moire = MoireRecaptureGenerator(config).generate(face_like_image)
         assert high_frequency_energy(with_moire) > high_frequency_energy(without)
 
@@ -197,20 +219,51 @@ class TestOrientationSymmetry:
         }
         assert turns == {True, False}
 
-    def test_a_still_configuration_pins_the_orientation(self, face_like_image: RgbImage) -> None:
-        config = dataclasses.replace(NEUTRAL, moire_amplitude=0.25, variation=0.0)
+    def test_a_zero_angle_spread_keeps_the_fringes_upright(self, face_like_image: RgbImage) -> None:
+        config = dataclasses.replace(
+            NEUTRAL, moire_amplitude=0.25, moire_cross_weight=0.0, moire_max_angle_deg=0.0
+        )
         generator = MoireRecaptureGenerator(config)
-        leans = {
-            fringe_handedness(generator.generate(variant)) > 0.0
-            for variant in variants_of(np.full_like(face_like_image, 128), 20)
-        }
-        assert len(leans) == 1
+        for variant in variants_of(np.full_like(face_like_image, 128), 10):
+            attack = generator.generate(variant)
+            assert np.array_equal(attack[1], attack[-1])
 
-    def test_the_fringe_frequency_never_turns_negative(self, face_like_image: RgbImage) -> None:
-        config = dataclasses.replace(NEUTRAL, moire_amplitude=0.25, variation=0.9)
+
+class TestFringeFrequency:
+    SPREAD = dataclasses.replace(
+        NEUTRAL,
+        moire_amplitude=0.25,
+        moire_cross_weight=0.0,
+        moire_max_angle_deg=0.0,
+        moire_min_cycles_per_width=8.0,
+        moire_max_cycles_per_width=64.0,
+    )
+
+    def frequencies(self, config: MoireConfig, count: int) -> list[int]:
+        flat = np.full((224, 224, 3), 128, dtype=np.uint8)
         generator = MoireRecaptureGenerator(config)
-        for variant in variants_of(np.full_like(face_like_image, 128), 20):
-            assert high_frequency_energy(generator.generate(variant)) > 0.0
+        return [upright_fringe_frequency(generator.generate(v)) for v in variants_of(flat, count)]
+
+    def test_stays_inside_the_configured_range(self) -> None:
+        assert all(8 <= cycles <= 64 for cycles in self.frequencies(self.SPREAD, 30))
+
+    def test_spreads_evenly_on_a_logarithmic_scale(self) -> None:
+        geometric_middle = (8.0 * 64.0) ** 0.5
+        below = sum(cycles < geometric_middle for cycles in self.frequencies(self.SPREAD, 60))
+        assert 18 <= below <= 42
+
+    def test_a_range_of_one_value_fixes_it(self) -> None:
+        fixed = at_fixed_frequency(self.SPREAD, 20.0)
+        assert set(self.frequencies(fixed, 10)) == {20}
+
+
+class TestNoise:
+    def test_leaves_a_grey_image_grey(self) -> None:
+        config = dataclasses.replace(NEUTRAL, noise_sigma_levels=4.0)
+        attack = MoireRecaptureGenerator(config).generate(np.full((32, 32, 3), 128, np.uint8))
+        assert not np.all(attack == 128)
+        assert np.array_equal(attack[..., 0], attack[..., 1])
+        assert np.array_equal(attack[..., 1], attack[..., 2])
 
 
 class TestConfig:
@@ -220,17 +273,17 @@ class TestConfig:
             MoireConfig(**override)
 
     def test_describe_carries_every_parameter(self) -> None:
-        config = MoireConfig(moire_cycles_per_width=123.0)
+        config = MoireConfig(saturation=1.23)
         described = MoireRecaptureGenerator(config).describe()
         assert described["generator"] == "moire"
-        assert described["moire_cycles_per_width"] == 123.0
+        assert described["saturation"] == 1.23
         assert set(described) == {"generator"} | {f.name for f in dataclasses.fields(MoireConfig)}
 
 
 class TestFringeResolution:
     def test_warns_when_the_period_falls_below_nyquist(self) -> None:
         tiny = np.full((48, 48, 3), 128, dtype=np.uint8)
-        config = dataclasses.replace(NEUTRAL, moire_amplitude=0.1, moire_cycles_per_width=60.0)
+        config = at_fixed_frequency(dataclasses.replace(NEUTRAL, moire_amplitude=0.1), 60.0)
         with pytest.warns(RuntimeWarning, match="fringe period"):
             MoireRecaptureGenerator(config).generate(tiny)
 

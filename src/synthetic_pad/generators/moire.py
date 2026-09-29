@@ -8,7 +8,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-from synthetic_pad.domain.image import RgbImage, ensure_rgb_uint8
+from synthetic_pad.domain.image import LUMA_WEIGHTS, RgbImage, ensure_rgb_uint8
 from synthetic_pad.domain.ports import AttackGenerator
 from synthetic_pad.domain.validation import (
     require_non_negative,
@@ -31,15 +31,17 @@ class MoireConfig:
     tilt_x: float = 0.05
     tilt_y: float = 0.03
     rotation_deg: float = 0.8
-    contrast: float = 0.82
-    black_level: float = 0.06
-    white_level: float = 0.93
+    contrast: float = 1.5
+    saturation: float = 1.1
+    black_level: float = 0.02
+    white_level: float = 0.98
     glare_intensity: float = 0.20
     glare_extent: float = 0.26
-    blur_sigma_px: float = 0.7
-    moire_amplitude: float = 0.10
-    moire_cycles_per_width: float = 20.0
-    moire_angle_deg: float = 12.0
+    blur_sigma_px: float = 0.0
+    moire_amplitude: float = 0.05
+    moire_min_cycles_per_width: float = 4.0
+    moire_max_cycles_per_width: float = 24.0
+    moire_max_angle_deg: float = 90.0
     moire_chroma_shift_rad: float = 0.9
     moire_cross_weight: float = 0.45
     noise_sigma_levels: float = 2.0
@@ -50,9 +52,11 @@ class MoireConfig:
         require_positive(
             contrast=self.contrast,
             glare_extent=self.glare_extent,
-            moire_cycles_per_width=self.moire_cycles_per_width,
+            moire_min_cycles_per_width=self.moire_min_cycles_per_width,
         )
         require_non_negative(
+            saturation=self.saturation,
+            moire_max_angle_deg=self.moire_max_angle_deg,
             blur_sigma_px=self.blur_sigma_px,
             moire_amplitude=self.moire_amplitude,
             moire_cross_weight=self.moire_cross_weight,
@@ -60,6 +64,11 @@ class MoireConfig:
             variation=self.variation,
         )
         require_unit_interval(glare_intensity=self.glare_intensity)
+        if self.moire_min_cycles_per_width > self.moire_max_cycles_per_width:
+            raise ValueError(
+                "require moire_min_cycles_per_width <= moire_max_cycles_per_width, got "
+                f"{self.moire_min_cycles_per_width} and {self.moire_max_cycles_per_width}"
+            )
         if not 0.0 <= self.black_level < self.white_level <= 1.0:
             raise ValueError(
                 "require 0 <= black_level < white_level <= 1, got "
@@ -78,7 +87,7 @@ class MoireRecaptureGenerator(AttackGenerator):
         rng = np.random.default_rng([self._config.seed, _content_digest(image)])
         canvas: FloatImage = image.astype(np.float64) / 255.0
         canvas = self._apply_geometry(canvas, rng)
-        canvas = self._apply_tone(canvas)
+        canvas = self._apply_tone(canvas, rng)
         canvas = self._apply_glare(canvas, rng)
         canvas = self._apply_lens(canvas)
         canvas = self._apply_moire(canvas, rng)
@@ -128,10 +137,14 @@ class MoireRecaptureGenerator(AttackGenerator):
         )
         return _as_float(warped)
 
-    def _apply_tone(self, canvas: FloatImage) -> FloatImage:
+    def _apply_tone(self, canvas: FloatImage, rng: np.random.Generator) -> FloatImage:
         cfg = self._config
-        toned = np.clip((canvas - 0.5) * cfg.contrast + 0.5, 0.0, 1.0)
-        return cfg.black_level + toned * (cfg.white_level - cfg.black_level)
+        contrast = cfg.contrast * self._jitter_magnitude(rng)
+        saturation = cfg.saturation * self._jitter_magnitude(rng)
+        toned = np.clip((canvas - 0.5) * contrast + 0.5, 0.0, 1.0)
+        luma = (toned @ LUMA_WEIGHTS)[..., None]
+        coloured = np.clip(luma + saturation * (toned - luma), 0.0, 1.0)
+        return _as_float(cfg.black_level + coloured * (cfg.white_level - cfg.black_level))
 
     def _apply_glare(self, canvas: FloatImage, rng: np.random.Generator) -> FloatImage:
         cfg = self._config
@@ -169,12 +182,17 @@ class MoireRecaptureGenerator(AttackGenerator):
         height, width = canvas.shape[:2]
         rows, cols = np.mgrid[0:height, 0:width].astype(np.float64)
         x_in_widths, y_in_widths = cols / width, rows / width
-        angle = math.radians(cfg.moire_angle_deg * self._jitter_orientation(rng))
+        angle = math.radians(rng.uniform(-cfg.moire_max_angle_deg, cfg.moire_max_angle_deg))
         along_grating = x_in_widths * math.cos(angle) + y_in_widths * math.sin(angle)
         across_grating = -x_in_widths * math.sin(angle) + y_in_widths * math.cos(angle)
 
-        cycles_per_width = cfg.moire_cycles_per_width * self._jitter_magnitude(rng)
-        self._warn_if_unresolvable(cycles_per_width, width)
+        self._warn_if_unresolvable(cfg.moire_max_cycles_per_width, width)
+        cycles_per_width = math.exp(
+            rng.uniform(
+                math.log(cfg.moire_min_cycles_per_width), math.log(cfg.moire_max_cycles_per_width)
+            )
+        )
+        amplitude = cfg.moire_amplitude * self._jitter_magnitude(rng)
 
         channel_phases = np.arange(3) * cfg.moire_chroma_shift_rad
         pattern = np.zeros((height, width, 3), dtype=np.float64)
@@ -187,17 +205,17 @@ class MoireRecaptureGenerator(AttackGenerator):
             pattern += axis_weight * np.sin(carrier[..., None] + channel_phases)
             weight_total += axis_weight
 
-        return canvas * (1.0 + cfg.moire_amplitude * pattern / weight_total)
+        return canvas * (1.0 + amplitude * pattern / weight_total)
 
     def _warn_if_unresolvable(self, cycles_per_width: float, width: int) -> None:
         period_px = width / cycles_per_width
         if period_px >= MIN_RESOLVABLE_PERIOD_PX:
             return
         warnings.warn(
-            f"moire_cycles_per_width={cycles_per_width:.1f} yields a {period_px:.2f} px fringe "
-            f"period at width {width}px. Below {MIN_RESOLVABLE_PERIOD_PX} px the pattern aliases "
-            "and no longer represents the requested frequency: lower moire_cycles_per_width or "
-            "work on larger crops.",
+            f"moire_max_cycles_per_width={cycles_per_width:.1f} yields a {period_px:.2f} px "
+            f"fringe period at width {width}px. Below {MIN_RESOLVABLE_PERIOD_PX} px the pattern "
+            "aliases and no longer represents the requested frequency: lower "
+            "moire_max_cycles_per_width or work on larger crops.",
             RuntimeWarning,
             stacklevel=4,
         )
@@ -205,7 +223,8 @@ class MoireRecaptureGenerator(AttackGenerator):
     def _apply_noise(self, canvas: FloatImage, rng: np.random.Generator) -> FloatImage:
         if self._config.noise_sigma_levels == 0.0:
             return canvas
-        noise = rng.normal(0.0, self._config.noise_sigma_levels / 255.0, canvas.shape)
+        height, width = canvas.shape[:2]
+        noise = rng.normal(0.0, self._config.noise_sigma_levels / 255.0, (height, width, 1))
         return canvas + noise
 
     def _jitter_magnitude(self, rng: np.random.Generator) -> float:
