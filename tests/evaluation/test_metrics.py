@@ -7,6 +7,7 @@ from synthetic_pad.evaluation.metrics import (
     apcer,
     auc,
     bpcer,
+    classification_metrics,
     eer,
     eer_threshold,
     hter,
@@ -142,3 +143,21 @@ class TestAuc:
     def test_rejects_an_empty_array(self) -> None:
         with pytest.raises(ValueError, match="bonafide_scores"):
             auc(scores(0.5), scores())
+
+
+class TestClassificationMetrics:
+    def test_treats_the_attack_as_the_positive_class(self) -> None:
+        attacks, bonafide = scores(0.9, 0.8, 0.2), scores(0.1, 0.7)
+        assert classification_metrics(attacks, bonafide, 0.5) == pytest.approx(
+            {"accuracy": 3 / 5, "precision": 2 / 3, "recall": 2 / 3, "f1": 2 / 3}
+        )
+
+    def test_a_score_on_the_threshold_is_flagged_as_an_attack(self) -> None:
+        assert classification_metrics(scores(0.5), scores(0.1), 0.5)["recall"] == 1.0
+
+    def test_precision_is_zero_when_nothing_is_flagged(self) -> None:
+        assert classification_metrics(scores(0.1), scores(0.2), 0.9)["precision"] == 0.0
+
+    def test_rejects_an_empty_array(self) -> None:
+        with pytest.raises(ValueError, match="bonafide_scores"):
+            classification_metrics(scores(0.9), scores(), 0.5)

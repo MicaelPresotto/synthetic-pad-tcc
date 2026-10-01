@@ -1,4 +1,4 @@
-"""PAD metrics as defined in ISO/IEC 30107-3.
+"""PAD metrics as defined in ISO/IEC 30107-3, and the general classification metrics.
 
 Scores run higher for attacks, and a sample counts as an attack at or above the
 threshold.
@@ -7,6 +7,7 @@ threshold.
 from typing import Any
 
 import numpy as np
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
 type FloatArray = np.ndarray[Any, np.dtype[np.floating[Any]]]
 
@@ -68,6 +69,21 @@ def auc(attack_scores: FloatArray, bonafide_scores: FloatArray) -> float:
     """Area under the ROC curve, which no choice of threshold influences."""
     _, apcer_at_each, bpcer_at_each = _operating_curve(attack_scores, bonafide_scores)
     return float(np.trapezoid(1.0 - apcer_at_each, bpcer_at_each))
+
+
+def classification_metrics(
+    attack_scores: FloatArray, bonafide_scores: FloatArray, threshold: float
+) -> dict[str, float]:
+    """Accuracy, precision, recall and F1, with the attack as the positive class."""
+    _require_scores(attack_scores=attack_scores, bonafide_scores=bonafide_scores)
+    is_attack = np.concatenate([np.ones(attack_scores.size), np.zeros(bonafide_scores.size)])
+    flagged = np.concatenate([attack_scores, bonafide_scores]) >= threshold
+    return {
+        "accuracy": float(accuracy_score(is_attack, flagged)),
+        "precision": float(precision_score(is_attack, flagged, zero_division=0.0)),
+        "recall": float(recall_score(is_attack, flagged, zero_division=0.0)),
+        "f1": float(f1_score(is_attack, flagged, zero_division=0.0)),
+    }
 
 
 def _operating_curve(
