@@ -94,6 +94,13 @@ class MoireRecaptureGenerator(AttackGenerator):
         canvas = self._apply_noise(canvas, rng)
         return _quantise_to_uint8(canvas)
 
+    def add_sensor_noise(self, image: RgbImage) -> RgbImage:
+        """The noise stage alone, so that real crops can carry the noise the attacks carry."""
+        ensure_rgb_uint8(image)
+        rng = np.random.default_rng([self._config.seed, _content_digest(image)])
+        canvas: FloatImage = image.astype(np.float64) / 255.0
+        return _quantise_to_uint8(self._apply_noise(canvas, rng))
+
     def describe(self) -> Mapping[str, object]:
         return {"generator": self.name, **asdict(self._config)}
 
