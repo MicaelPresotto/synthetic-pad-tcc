@@ -7,6 +7,7 @@ from synthetic_pad.evaluation.metrics import (
     apcer,
     auc,
     bpcer,
+    bpcer_threshold,
     classification_metrics,
     eer,
     eer_threshold,
@@ -86,6 +87,39 @@ class TestEerThreshold:
     def test_reproduces_the_equal_error_rate_it_was_derived_from(self) -> None:
         attacks, bonafide = scores(0.3, 0.55, 0.6, 0.9), scores(0.1, 0.4, 0.5, 0.7)
         assert acer(attacks, bonafide, eer_threshold(attacks, bonafide)) == eer(attacks, bonafide)
+
+
+class TestBpcerThreshold:
+    def test_rejects_no_more_bona_fide_than_the_target(self) -> None:
+        bonafide = scores(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+        assert bpcer(bonafide, bpcer_threshold(bonafide, 0.2)) == 0.2
+
+    def test_sits_midway_to_the_next_lower_score(self) -> None:
+        assert bpcer_threshold(scores(0.1, 0.2, 0.3, 0.9), 0.25) == pytest.approx(0.6)
+
+    def test_never_crosses_a_tie_that_would_exceed_the_target(self) -> None:
+        bonafide = scores(0.1, 0.2, 0.8, 0.8)
+        assert bpcer(bonafide, bpcer_threshold(bonafide, 0.25)) == 0.0
+
+    def test_rejects_nothing_when_even_the_highest_score_would_exceed_the_target(self) -> None:
+        assert bpcer_threshold(scores(0.1, 0.2), 0.0) == np.inf
+
+    def test_rejects_every_sample_at_a_target_of_one(self) -> None:
+        bonafide = scores(0.1, 0.2, 0.3)
+        assert bpcer(bonafide, bpcer_threshold(bonafide, 1.0)) == 1.0
+
+    def test_ignores_how_the_scores_are_ordered(self) -> None:
+        assert bpcer_threshold(scores(0.9, 0.1, 0.3, 0.2), 0.25) == bpcer_threshold(
+            scores(0.1, 0.2, 0.3, 0.9), 0.25
+        )
+
+    def test_rejects_a_target_outside_the_unit_interval(self) -> None:
+        with pytest.raises(ValueError, match="target_bpcer"):
+            bpcer_threshold(scores(0.1), 1.5)
+
+    def test_rejects_an_empty_array(self) -> None:
+        with pytest.raises(ValueError, match="bonafide_scores"):
+            bpcer_threshold(scores(), 0.05)
 
 
 class TestHter:

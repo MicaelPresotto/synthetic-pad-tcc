@@ -186,7 +186,9 @@ Attacks are scored by a liveness detector and evaluated using standard PAD metri
 - **AUC** — threshold-independent measure of separability
 
 Metric definitions follow ISO/IEC 30107-3. Accuracy, precision, recall and F1, with the
-attack as the positive class, are reported at the same development threshold.
+attack as the positive class, are reported at the same development threshold. As a
+sensitivity analysis, the thesis also reports the errors at a second threshold, set from
+the development bona fide alone: the lowest one that rejects at most 5% of them.
 
 ### Reproducing the thesis
 
