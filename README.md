@@ -219,7 +219,8 @@ It reads the ten-seed runs of `results/clean`, the reruns with the noise stage o
 with noise on every real crop (`results/noise-real-crops`), the first-generator runs of
 `results/judges` and the calibration reports, and writes the `.tex` tables and `.pdf`
 figures into `monographs/`. `ablate_generator.py` writes the `ablation.json` behind the
-stage table: the median score a trained judge gives to attacks rendered with each
+stage tables, run on every synthetic judge of `results/clean` and
+`results/noise-real-crops`: the median score a trained judge gives to attacks rendered with each
 stage of the generator switched on or off.
 
 ```bash

@@ -354,6 +354,45 @@ def ablation_table(runs: Runs) -> str:
     )
 
 
+def median_and_range(values: Sequence[float]) -> str:
+    return f"{np.median(values):.2f} ({score_range(values)})"
+
+
+def noise_ablation_table(noise_on: Runs, noise_on_real_crops: Runs) -> str:
+    groups = [(runs, corpus) for runs in (noise_on, noise_on_real_crops) for corpus in CORPUS_NAMES]
+    lines = (
+        ("Every stage", "every stage"),
+        ("Every stage but noise", "every stage but noise"),
+        ("Noise alone", "noise alone"),
+        ("Every stage but moiré", "every stage but moire"),
+    )
+    rows = []
+    for title, variant in lines:
+        cells = [
+            median_and_range(
+                [
+                    json.loads((run / "ablation.json").read_text())["median_score"][variant]
+                    for run in runs[(corpus, "synthetic")].values()
+                ]
+            )
+            for runs, corpus in groups
+        ]
+        rows.append("\t\t" + " & ".join([title, *cells]) + " \\\\")
+    return table(
+        "Median score of the calibrated synthetic detectors on attacks rendered from the bona fide "
+        "test crops of their own dataset, with one stage switched on or off: median over ten "
+        "seeds, with the range across seeds.",
+        "tab:ablation-noise",
+        "Xcccc",
+        "& \\multicolumn{2}{c}{\\textbf{Noise on synthetic attacks}} & "
+        "\\multicolumn{2}{c}{\\textbf{Noise on real crops too}} \\\\\n"
+        "\t\t\\cmidrule(lr){2-3} \\cmidrule(lr){4-5}\n"
+        "\t\t\\textbf{Attack rendered with} & \\textbf{MSU-MFSD} & \\textbf{Replay-Mobile} & "
+        "\\textbf{MSU-MFSD} & \\textbf{Replay-Mobile}",
+        rows,
+    )
+
+
 def relative_statistics(section: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Ratios of each group to the bona fide crops. Reports written before the calibration
     search, such as the first generator's, nest them under a single key."""
@@ -568,6 +607,7 @@ def main() -> None:
         "tab-threshold.tex": threshold_table(clean),
         "tab-noise.tex": noise_table(clean, find_runs(args.noise_off), noise_on_real_crops),
         "tab-ablation.tex": ablation_table(find_runs(args.first_generator_runs)),
+        "tab-ablation-noise.tex": noise_ablation_table(clean, noise_on_real_crops),
         "tab-calibration.tex": calibration_table(first_generator),
     }
     for name, content in outputs.items():
