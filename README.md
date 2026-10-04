@@ -168,9 +168,15 @@ filmed by cameras with different noise levels, so a judge can learn the noise le
 a camera instead of a recapture. `--noise-real-crops` adds the same noise stage to
 every real training crop too, bona fide and real attacks alike, so that noise no
 longer tells the classes apart.
+The other way round is to match the noise instead of masking it. With
+`noise_to_bona_fide` set, the generator adds, to each attack, the noise that brings its
+measured level to that multiple of the bona fide face it was rendered from, found by
+bisection. The `-matched-noise` configs in `experiments/` set it to the median ratio of
+real replays to bona fide crops in each training partition: 1.24 for MSU-MFSD and 1.11
+for Replay-Mobile.
 `measure_noise.py` prints the evidence for that shortcut: the median noise of the
 training crops of each corpus by species, of the attacks each fitted generator renders
-with and without its noise stage, and of the bona fide crops once they carry that noise.
+with, without and with matched noise, and of the bona fide crops once they carry that noise.
 The noise is estimated on luma with Immerkaer's (1996) estimator, in grey levels.
 
 ```bash

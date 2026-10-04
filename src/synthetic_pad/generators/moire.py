@@ -25,6 +25,9 @@ GLARE_CENTRE_Y_RANGE = (0.05, 0.55)
 GLARE_ASPECT = 0.32
 GLARE_ANGLE_DEG = -35.0
 NEUTRAL_TONE = (1.0, 1.0, 0.0, 1.0)
+NOISE_SEARCH_CEILING = 4.0
+NOISE_SEARCH_STEPS = 20
+NOISE_KERNEL = np.array([[1, -2, 1], [-2, 4, -2], [1, -2, 1]], dtype=np.float64)
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +49,7 @@ class MoireConfig:
     moire_chroma_shift_rad: float = 0.9
     moire_cross_weight: float = 0.45
     noise_sigma_levels: float = 2.0
+    noise_to_bona_fide: float = 0.0
     variation: float = 0.25
     seed: int = 20260823
 
@@ -62,6 +66,7 @@ class MoireConfig:
             moire_amplitude=self.moire_amplitude,
             moire_cross_weight=self.moire_cross_weight,
             noise_sigma_levels=self.noise_sigma_levels,
+            noise_to_bona_fide=self.noise_to_bona_fide,
             variation=self.variation,
         )
         require_unit_interval(glare_intensity=self.glare_intensity)
@@ -69,6 +74,11 @@ class MoireConfig:
             raise ValueError(
                 "require moire_min_cycles_per_width <= moire_max_cycles_per_width, got "
                 f"{self.moire_min_cycles_per_width} and {self.moire_max_cycles_per_width}"
+            )
+        if self.noise_sigma_levels > 0.0 and self.noise_to_bona_fide > 0.0:
+            raise ValueError(
+                "set either noise_sigma_levels or noise_to_bona_fide, got "
+                f"{self.noise_sigma_levels} and {self.noise_to_bona_fide}"
             )
         if not 0.0 <= self.black_level < self.white_level <= 1.0:
             raise ValueError(
@@ -92,7 +102,7 @@ class MoireRecaptureGenerator(AttackGenerator):
         canvas = self._apply_glare(canvas, rng)
         canvas = self._apply_lens(canvas)
         canvas = self._apply_moire(canvas, rng)
-        canvas = self._apply_noise(canvas, rng)
+        canvas = self._apply_noise(canvas, rng, image)
         return _quantise_to_uint8(canvas)
 
     def add_sensor_noise(self, image: RgbImage) -> RgbImage:
@@ -100,7 +110,7 @@ class MoireRecaptureGenerator(AttackGenerator):
         ensure_rgb_uint8(image)
         rng = np.random.default_rng([self._config.seed, _content_digest(image)])
         canvas: FloatImage = image.astype(np.float64) / 255.0
-        return _quantise_to_uint8(self._apply_noise(canvas, rng))
+        return _quantise_to_uint8(self._apply_noise(canvas, rng, image))
 
     def describe(self) -> Mapping[str, object]:
         return {"generator": self.name, **asdict(self._config)}
@@ -230,11 +240,18 @@ class MoireRecaptureGenerator(AttackGenerator):
             stacklevel=4,
         )
 
-    def _apply_noise(self, canvas: FloatImage, rng: np.random.Generator) -> FloatImage:
-        if self._config.noise_sigma_levels == 0.0:
-            return canvas
+    def _apply_noise(
+        self, canvas: FloatImage, rng: np.random.Generator, bona_fide: RgbImage
+    ) -> FloatImage:
+        cfg = self._config
         height, width = canvas.shape[:2]
-        noise = rng.normal(0.0, self._config.noise_sigma_levels / 255.0, (height, width, 1))
+        if cfg.noise_to_bona_fide > 0.0:
+            unit_noise = rng.standard_normal((height, width, 1))
+            target = cfg.noise_to_bona_fide * noise_level(bona_fide)
+            return canvas + _matching_sigma_levels(canvas, unit_noise, target) / 255.0 * unit_noise
+        if cfg.noise_sigma_levels == 0.0:
+            return canvas
+        noise = rng.normal(0.0, cfg.noise_sigma_levels / 255.0, (height, width, 1))
         return canvas + noise
 
     def _jitter_magnitude(self, rng: np.random.Generator) -> float:
@@ -247,6 +264,31 @@ class MoireRecaptureGenerator(AttackGenerator):
             return 1.0
         handedness = 1.0 if rng.random() < 0.5 else -1.0
         return handedness * self._jitter_magnitude(rng)
+
+
+def noise_level(image: RgbImage) -> float:
+    """Standard deviation of the noise of luma, in grey levels, by the estimator of
+    Immerkaer (1996); its kernel cancels smooth structure, but fine texture still adds to it."""
+    ensure_rgb_uint8(image)
+    luma = image.astype(np.float64) @ LUMA_WEIGHTS
+    response = cv2.filter2D(luma, cv2.CV_64F, NOISE_KERNEL)[1:-1, 1:-1]
+    return float(np.sqrt(np.pi / 2.0) * np.abs(response).sum() / (6.0 * response.size))
+
+
+def _matching_sigma_levels(canvas: FloatImage, unit_noise: FloatImage, target: float) -> float:
+    """Grey levels of the given noise that bring the measured noise of the attack to the target,
+    found by bisection, since texture and noise do not add in quadrature under the estimator."""
+
+    def level(sigma_levels: float) -> float:
+        return noise_level(_quantise_to_uint8(canvas + sigma_levels / 255.0 * unit_noise))
+
+    if level(0.0) >= target:
+        return 0.0
+    low, high = 0.0, NOISE_SEARCH_CEILING * target
+    for _ in range(NOISE_SEARCH_STEPS):
+        middle = (low + high) / 2.0
+        low, high = (middle, high) if level(middle) < target else (low, middle)
+    return high
 
 
 def _as_float(array: Any) -> FloatImage:

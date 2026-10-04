@@ -3,9 +3,10 @@ from pathlib import Path
 
 import numpy as np
 
-from synthetic_pad.calibration import noise_level, read_fitted_config
+from synthetic_pad.calibration import read_fitted_config
+from synthetic_pad.corpora import BONA_FIDE, REPLAY
 from synthetic_pad.frames import CORPORA, load_partitions, read_crops, select
-from synthetic_pad.generators.moire import MoireRecaptureGenerator
+from synthetic_pad.generators.moire import MoireRecaptureGenerator, noise_level
 
 
 def median_noise(images: np.ndarray) -> float:
@@ -28,11 +29,15 @@ def main() -> None:
     for corpus in CORPORA:
         training = select(partitions[corpus], "train")
         print(f"\n{corpus}, training partition, median noise in grey levels")
+        medians = {}
         for species in sorted({sample.species for sample in training}):
             crops = read_crops([sample for sample in training if sample.species == species])
-            print(f"  real {species:31s} {median_noise(crops):5.2f}  ({len(crops)} crops)")
+            medians[species] = median_noise(crops)
+            print(f"  real {species:31s} {medians[species]:5.2f}  ({len(crops)} crops)")
+        print(f"  real replays / bona fide        {medians[REPLAY] / medians[BONA_FIDE]:5.2f}")
         bona_fide = read_crops([sample for sample in training if not sample.is_attack])
-        for name in (f"moire-fitted-to-{corpus}", f"moire-fitted-to-{corpus}-without-noise"):
+        for variant in ("", "-without-noise", "-matched-noise"):
+            name = f"moire-fitted-to-{corpus}{variant}"
             generator = MoireRecaptureGenerator(
                 read_fitted_config(args.experiments / f"{name}.json")
             )

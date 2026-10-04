@@ -1,0 +1,28 @@
+{
+  "fitted_to": "msu training replays, with the noise matched per face to 1.24 times the bona fide noise, the median ratio of the training replays",
+  "trials": 250,
+  "distance": 0.03638926477681466,
+  "default_distance": 0.03638926477681466,
+  "config": {
+    "tilt_x": 0.05,
+    "tilt_y": 0.03,
+    "rotation_deg": 0.8,
+    "contrast": 1.5,
+    "saturation": 1.1,
+    "black_level": 0.02,
+    "white_level": 0.98,
+    "glare_intensity": 0.2,
+    "glare_extent": 0.26,
+    "blur_sigma_px": 0.0,
+    "moire_amplitude": 0.05,
+    "moire_min_cycles_per_width": 4.0,
+    "moire_max_cycles_per_width": 24.0,
+    "moire_max_angle_deg": 90.0,
+    "moire_chroma_shift_rad": 0.9,
+    "moire_cross_weight": 0.45,
+    "noise_sigma_levels": 0.0,
+    "noise_to_bona_fide": 1.24,
+    "variation": 0.25,
+    "seed": 20260823
+  }
+}
