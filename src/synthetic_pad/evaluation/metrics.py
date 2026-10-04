@@ -1,4 +1,4 @@
-"""PAD metrics as defined in ISO/IEC 30107-3.
+"""PAD metrics as defined in ISO/IEC 30107-3, and the general classification metrics.
 
 Scores run higher for attacks, and a sample counts as an attack at or above the
 threshold.
@@ -7,6 +7,7 @@ threshold.
 from typing import Any
 
 import numpy as np
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
 type FloatArray = np.ndarray[Any, np.dtype[np.floating[Any]]]
 
@@ -50,6 +51,25 @@ def eer_threshold(attack_scores: FloatArray, bonafide_scores: FloatArray) -> flo
     return float((thresholds[highest] + thresholds[lowest + 1]) / 2.0)
 
 
+def bpcer_threshold(bonafide_scores: FloatArray, target_bpcer: float) -> float:
+    """Lowest threshold whose BPCER stays at or below the target, a fraction in [0, 1].
+
+    Set from bona fide scores alone, so it does not depend on which attacks a development
+    set happens to hold. It sits midway to the next lower score, as eer_threshold does.
+    """
+    _require_scores(bonafide_scores=bonafide_scores)
+    if not 0.0 <= target_bpcer <= 1.0:
+        raise ValueError(f"target_bpcer must lie in [0, 1], got {target_bpcer}")
+    observed = np.unique(bonafide_scores)
+    within = np.flatnonzero([bpcer(bonafide_scores, t) <= target_bpcer for t in observed])
+    if within.size == 0:
+        return float(np.inf)
+    lowest = within[0]
+    if lowest == 0:
+        return float(observed[0])
+    return float((observed[lowest - 1] + observed[lowest]) / 2.0)
+
+
 def hter(
     development_attack_scores: FloatArray,
     development_bonafide_scores: FloatArray,
@@ -68,6 +88,21 @@ def auc(attack_scores: FloatArray, bonafide_scores: FloatArray) -> float:
     """Area under the ROC curve, which no choice of threshold influences."""
     _, apcer_at_each, bpcer_at_each = _operating_curve(attack_scores, bonafide_scores)
     return float(np.trapezoid(1.0 - apcer_at_each, bpcer_at_each))
+
+
+def classification_metrics(
+    attack_scores: FloatArray, bonafide_scores: FloatArray, threshold: float
+) -> dict[str, float]:
+    """Accuracy, precision, recall and F1, with the attack as the positive class."""
+    _require_scores(attack_scores=attack_scores, bonafide_scores=bonafide_scores)
+    is_attack = np.concatenate([np.ones(attack_scores.size), np.zeros(bonafide_scores.size)])
+    flagged = np.concatenate([attack_scores, bonafide_scores]) >= threshold
+    return {
+        "accuracy": float(accuracy_score(is_attack, flagged)),
+        "precision": float(precision_score(is_attack, flagged, zero_division=0.0)),
+        "recall": float(recall_score(is_attack, flagged, zero_division=0.0)),
+        "f1": float(f1_score(is_attack, flagged, zero_division=0.0)),
+    }
 
 
 def _operating_curve(

@@ -1,0 +1,526 @@
+import argparse
+import json
+from collections import defaultdict
+from collections.abc import Callable, Sequence
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+from matplotlib.figure import Figure
+from matplotlib.ticker import NullFormatter
+
+from synthetic_pad.corpora import BONA_FIDE
+from synthetic_pad.evaluation.metrics import (
+    acer,
+    apcer,
+    bpcer,
+    bpcer_threshold,
+    classification_metrics,
+)
+
+CORPUS_NAMES = {"msu": "MSU-MFSD", "replay-mobile": "Replay-Mobile"}
+DIRECTIONS = (("msu", "replay-mobile"), ("replay-mobile", "msu"))
+CONFIGURATIONS = ("real", "synthetic", "mixed")
+SPECIES = ("replay", "print")
+STAGES = ("geometry", "tone", "glare", "lens", "moire", "noise")
+TONE_STATISTICS = ("saturation", "contrast", "black_level", "white_level", "sharpness")
+GENERATED = "generated"
+BOOTSTRAP_RESAMPLES = 10_000
+BOOTSTRAP_SEED = 0
+CONFIDENCE = 0.95
+TARGET_BPCER = 0.05
+FIGURE_WIDTH_IN = 6.3
+FIGURE_HEIGHT_IN = 2.6
+SPECTRUM_TICKS = (0.5, 1.0, 2.0, 5.0, 10.0)
+SERIES_COLOURS = ("#2a78d6", "#eb6834", "#1baf7a")
+INK = "#52514e"
+GRID = "#d9d8d4"
+SOURCE_LINE = r"{\footnotesize Source: prepared by the author (2026).}"
+
+type Report = dict[str, Any]
+type Runs = dict[tuple[str, str], dict[int, Path]]
+
+
+def find_runs(results: Path) -> Runs:
+    """Run folders by (source corpus, training data), keyed by seed so that runs pair up."""
+    found: Runs = defaultdict(dict)
+    for path in sorted(results.glob("*/report.json")):
+        training = json.loads(path.read_text())["training"]
+        found[(training["corpus"], training["data"])][training["config"]["seed"]] = path.parent
+    return found
+
+
+def report(run: Path) -> Report:
+    return dict(json.loads((run / "report.json").read_text()))
+
+
+def measured(runs: dict[int, Path], pick: Callable[[Report], float]) -> np.ndarray:
+    return np.array([pick(report(run)) for _, run in sorted(runs.items())])
+
+
+def arrow(source: str, target: str) -> str:
+    return f"{CORPUS_NAMES[source]} $\\rightarrow$ {CORPUS_NAMES[target]}"
+
+
+def percent(values: np.ndarray) -> str:
+    return f"{100 * values.mean():.1f} $\\pm$ {100 * values.std():.1f}"
+
+
+def ratio(values: np.ndarray) -> str:
+    return f"{values.mean():.3f} $\\pm$ {values.std():.3f}"
+
+
+def cross_auc(species: str | None) -> Callable[[Report], float]:
+    if species is None:
+        return lambda r: float(r["cross"]["all_attacks"]["auc"])
+    return lambda r: float(r["cross"]["by_species"][species]["auc"])
+
+
+def intra_auc(species: str | None) -> Callable[[Report], float]:
+    if species is None:
+        return lambda r: float(r["intra"]["all_attacks"]["auc"])
+    return lambda r: float(r["intra"]["by_species"][species]["auc"])
+
+
+def hter_of(scenario: str) -> Callable[[Report], float]:
+    return lambda r: float(r[scenario]["all_attacks"]["hter"])
+
+
+def table(caption: str, label: str, columns: str, header: str, rows: Sequence[str]) -> str:
+    body = "\n".join(rows)
+    return (
+        "\\begin{center}\n"
+        f"\t\\captionof{{table}}{{{caption}}}\n"
+        f"\t\\label{{{label}}}\n"
+        "\t\\footnotesize\n"
+        "\t\\renewcommand{\\arraystretch}{1.2}\n"
+        f"\t\\begin{{tabularx}}{{\\textwidth}}{{{columns}}}\n"
+        "\t\t\\toprule\n"
+        f"\t\t{header} \\\\\n"
+        "\t\t\\midrule\n"
+        f"{body}\n"
+        "\t\t\\bottomrule\n"
+        "\t\\end{tabularx}\n\n"
+        f"\t{SOURCE_LINE}\n"
+        "\\end{center}\n"
+    )
+
+
+def baseline_table(runs: Runs) -> str:
+    rows = []
+    for source, target in DIRECTIONS:
+        real = runs[(source, "real")]
+        scenarios = ((source, "intra", intra_auc), (target, "cross", cross_auc))
+        for tested, scenario, auc_of in scenarios:
+            cells = [
+                arrow(source, tested),
+                percent(measured(real, hter_of(scenario))),
+                *(ratio(measured(real, auc_of(species))) for species in (None, *SPECIES)),
+            ]
+            rows.append("\t\t" + " & ".join(cells) + " \\\\")
+    return table(
+        "Detector trained on real data only: HTER (\\%) at the development threshold and AUC, "
+        "mean and standard deviation over ten seeds.",
+        "tab:baseline",
+        "Xcccc",
+        "\\textbf{Train $\\rightarrow$ test} & \\textbf{HTER} & \\textbf{AUC} & "
+        "\\textbf{AUC replay} & \\textbf{AUC print}",
+        rows,
+    )
+
+
+def main_table(runs: Runs) -> str:
+    rows = []
+    for source, target in DIRECTIONS:
+        for index, data in enumerate(CONFIGURATIONS):
+            trained = runs[(source, data)]
+            cells = [
+                arrow(source, target) if index == 0 else "",
+                data.capitalize(),
+                percent(measured(trained, hter_of("intra"))),
+                percent(measured(trained, hter_of("cross"))),
+                *(ratio(measured(trained, cross_auc(species))) for species in (None, *SPECIES)),
+            ]
+            rows.append("\t\t" + " & ".join(cells) + " \\\\")
+        if source != DIRECTIONS[-1][0]:
+            rows.append("\t\t\\midrule")
+    return table(
+        "Detectors trained on real, synthetic and mixed attacks, with the generator calibrated on "
+        "the source dataset alone: intra-dataset HTER (\\%), and cross-dataset HTER (\\%) and AUC, "
+        "mean and standard deviation over ten seeds.",
+        "tab:main",
+        "p{2.3cm}lccccc",
+        "\\textbf{Source $\\rightarrow$ target} & \\textbf{Attacks} & \\textbf{HTER intra} & "
+        "\\textbf{HTER cross} & \\textbf{AUC cross} & \\textbf{AUC replay} & \\textbf{AUC print}",
+        rows,
+    )
+
+
+def partition_scores(run: Path, partition: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Attack scores, bona fide scores and the species of each attack."""
+    scores = json.loads((run / "scores.json").read_text())[partition]
+    attacks = [s for s in scores if s["species"] != BONA_FIDE]
+    return (
+        np.array([s["score"] for s in attacks]),
+        np.array([s["score"] for s in scores if s["species"] == BONA_FIDE]),
+        np.array([s["species"] for s in attacks]),
+    )
+
+
+def scenario_metrics(run: Path, scenario: str) -> dict[str, float]:
+    """PAD and general classification metrics of one test partition, at the threshold the
+    development partition fixed."""
+    section = report(run)[scenario]
+    attacks, bona_fide, _ = partition_scores(run, scenario)
+    return {
+        **{f"apcer {species}": section["by_species"][species]["apcer"] for species in SPECIES},
+        "bpcer": section["bpcer"],
+        **classification_metrics(attacks, bona_fide, section["threshold"]),
+    }
+
+
+def metrics_table(runs: Runs) -> str:
+    columns = ("apcer replay", "apcer print", "bpcer", "accuracy", "precision", "recall", "f1")
+    rows = []
+    for source, target in DIRECTIONS:
+        for data in CONFIGURATIONS:
+            for scenario, tested in (("intra", source), ("cross", target)):
+                trained = runs[(source, data)].values()
+                per_seed = [scenario_metrics(run, scenario) for run in trained]
+                means = [100 * np.mean([m[column] for m in per_seed]) for column in columns]
+                cells = [
+                    arrow(source, tested),
+                    data.capitalize(),
+                    *(f"{value:.1f}" for value in means),
+                ]
+                rows.append("\t\t" + " & ".join(cells) + " \\\\")
+        if source != DIRECTIONS[-1][0]:
+            rows.append("\t\t\\midrule")
+    return table(
+        "PAD and general classification metrics (\\%) at the development threshold, with the "
+        "attack as the positive class: mean over ten seeds.",
+        "tab:metrics",
+        "Xlccccccc",
+        "\\textbf{Train $\\rightarrow$ test} & \\textbf{Attacks} & \\textbf{APCER replay} & "
+        "\\textbf{APCER print} & \\textbf{BPCER} & \\textbf{Accuracy} & \\textbf{Precision} & "
+        "\\textbf{Recall} & \\textbf{F1}",
+        rows,
+    )
+
+
+def bona_fide_rule(run: Path, scenario: str) -> dict[str, float]:
+    """Errors of one test partition at the threshold that keeps the development BPCER at or below
+    TARGET_BPCER, set from the development bona fide alone."""
+    _, development_bona_fide, _ = partition_scores(run, "development")
+    threshold = bpcer_threshold(development_bona_fide, TARGET_BPCER)
+    attacks, bona_fide, species = partition_scores(run, scenario)
+    return {
+        "hter": acer(attacks, bona_fide, threshold),
+        **{f"apcer {kind}": apcer(attacks[species == kind], threshold) for kind in SPECIES},
+        "bpcer": bpcer(bona_fide, threshold),
+    }
+
+
+def threshold_table(runs: Runs) -> str:
+    rows = []
+    for source, target in DIRECTIONS:
+        for index, data in enumerate(CONFIGURATIONS):
+            trained = list(runs[(source, data)].values())
+            cross = [bona_fide_rule(run, "cross") for run in trained]
+            values = [
+                np.mean([hter_of("intra")(report(run)) for run in trained]),
+                np.mean([bona_fide_rule(run, "intra")["hter"] for run in trained]),
+                np.mean([hter_of("cross")(report(run)) for run in trained]),
+                *(
+                    np.mean([errors[column] for errors in cross])
+                    for column in ("hter", "apcer replay", "apcer print", "bpcer")
+                ),
+            ]
+            cells = [
+                arrow(source, target) if index == 0 else "",
+                data.capitalize(),
+                *(f"{100 * value:.1f}" for value in values),
+            ]
+            rows.append("\t\t" + " & ".join(cells) + " \\\\")
+        if source != DIRECTIONS[-1][0]:
+            rows.append("\t\t\\midrule")
+    target = f"{100 * TARGET_BPCER:.0f}\\%"
+    return table(
+        "Error rates (\\%) under two threshold rules: the equal-error (EER) threshold of the "
+        "development set, and the threshold that rejects at most "
+        f"{target} of the development bona fide crops, set without looking at any attack. "
+        "Mean over ten seeds.",
+        "tab:threshold",
+        "Xlccccccc",
+        "& & \\multicolumn{2}{c}{\\textbf{HTER intra}} & "
+        "\\multicolumn{2}{c}{\\textbf{HTER cross}} & "
+        f"\\multicolumn{{3}}{{c}}{{\\textbf{{Cross at BPCER {target}}}}} \\\\\n"
+        "\t\t\\cmidrule(lr){3-4} \\cmidrule(lr){5-6} \\cmidrule(lr){7-9}\n"
+        "\t\t\\textbf{Source $\\rightarrow$ target} & \\textbf{Attacks} & "
+        f"\\textbf{{EER}} & \\textbf{{BPCER {target}}} & "
+        f"\\textbf{{EER}} & \\textbf{{BPCER {target}}} & "
+        "\\textbf{APCER replay} & \\textbf{APCER print} & \\textbf{BPCER}",
+        rows,
+    )
+
+
+def score_range(values: Sequence[float]) -> str:
+    low, high = f"{min(values):.2f}", f"{max(values):.2f}"
+    return low if low == high else f"{low}--{high}"
+
+
+def ablation_table(runs: Runs) -> str:
+    groups = [(data, corpus) for data in ("synthetic", "real") for corpus in CORPUS_NAMES]
+    medians = {
+        group: [
+            json.loads((run / "ablation.json").read_text())["median_score"]
+            for run in runs[(group[1], group[0])].values()
+        ]
+        for group in groups
+    }
+    others = [stage for stage in STAGES if stage != "moire"]
+    lines = (
+        ("Every stage", ["every stage"]),
+        ("Every stage but moiré", ["every stage but moire"]),
+        ("Moiré alone", ["moire alone"]),
+        ("Any other stage alone", [f"{stage} alone" for stage in others]),
+    )
+    rows = []
+    for title, variants in lines:
+        cells = [
+            score_range([seed[variant] for seed in medians[group] for variant in variants])
+            for group in groups
+        ]
+        rows.append("\t\t" + " & ".join([title, *cells]) + " \\\\")
+    return table(
+        "Median score of trained detectors on attacks rendered by the first generator from the "
+        "bona fide test crops of their own dataset, with one stage switched on or off, over "
+        "three seeds; the ranges span the seeds.",
+        "tab:ablation-v1",
+        "Xcccc",
+        "& \\multicolumn{2}{c}{\\textbf{Trained on synthetic attacks}} & "
+        "\\multicolumn{2}{c}{\\textbf{Trained on real attacks}} \\\\\n"
+        "\t\t\\textbf{Attack rendered with} & \\textbf{MSU-MFSD} & \\textbf{Replay-Mobile} & "
+        "\\textbf{MSU-MFSD} & \\textbf{Replay-Mobile}",
+        rows,
+    )
+
+
+def relative_statistics(section: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Ratios of each group to the bona fide crops. Reports written before the calibration
+    search, such as the first generator's, nest them under a single key."""
+    if "relative_to_bona_fide" in section:
+        return dict(section["relative_to_bona_fide"])
+    return {
+        group: {**section["tone"][group], "chroma_power": section["chroma_power"][group]}
+        for group in section["tone"]
+    }
+
+
+def calibration_table(first_generator: dict[str, Any]) -> str:
+    rows = []
+    for corpus, name in CORPUS_NAMES.items():
+        statistics = relative_statistics(first_generator[corpus])
+        for index, (group, title) in enumerate(
+            (("replay", "Real replay"), ("print", "Real print"), (GENERATED, "First generator"))
+        ):
+            values = [f"{statistics[group][statistic]:.2f}" for statistic in TONE_STATISTICS]
+            rows.append("\t\t" + " & ".join([name if index == 0 else "", title, *values]) + " \\\\")
+        if corpus != list(CORPUS_NAMES)[-1]:
+            rows.append("\t\t\\midrule")
+    return table(
+        "Image statistics of real and synthetic attacks relative to the bona fide crops of the "
+        "same training partition; a value of 1 means no difference.",
+        "tab:calibration",
+        "lXccccc",
+        "\\textbf{Dataset} & \\textbf{Crops} & \\textbf{Saturation} & \\textbf{Contrast} & "
+        "\\textbf{Black level} & \\textbf{White level} & \\textbf{Sharpness}",
+        rows,
+    )
+
+
+def style(axis: Any) -> None:
+    axis.grid(axis="y", color=GRID, linewidth=0.6)
+    axis.set_axisbelow(True)
+    for side in ("top", "right"):
+        axis.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        axis.spines[side].set_color(INK)
+    axis.tick_params(colors=INK, labelsize=8)
+
+
+def seeds_figure(runs: Runs, path: Path) -> None:
+    figure = Figure(figsize=(FIGURE_WIDTH_IN, FIGURE_HEIGHT_IN), layout="constrained")
+    axes = figure.subplots(1, 2, sharey=True)
+    for axis, (source, target) in zip(axes, DIRECTIONS, strict=True):
+        for position, data in enumerate(CONFIGURATIONS):
+            values = 100 * measured(runs[(source, data)], hter_of("cross"))
+            spread = np.linspace(-0.12, 0.12, values.size)
+            axis.scatter(position + spread, values, s=14, color=SERIES_COLOURS[0], zorder=3)
+            axis.hlines(values.mean(), position - 0.25, position + 0.25, color=INK, linewidth=2)
+        axis.set_xticks(range(len(CONFIGURATIONS)), [d.capitalize() for d in CONFIGURATIONS])
+        axis.set_title(f"{CORPUS_NAMES[source]} → {CORPUS_NAMES[target]}", fontsize=9, color=INK)
+        style(axis)
+    axes[0].set_ylabel("Cross-dataset HTER (%)", fontsize=8, color=INK)
+    figure.savefig(path)
+
+
+def spectrum_profiles(
+    first_generator: dict[str, Any], calibrated: dict[str, dict[str, Any]], corpus: str
+) -> list[tuple[str, list[float]]]:
+    fitted = relative_statistics(calibrated[corpus][corpus])
+    first = relative_statistics(first_generator[corpus])
+    return [
+        ("Real replay", fitted["replay"]["chroma_power"]),
+        ("First generator", first[GENERATED]["chroma_power"]),
+        ("Generator calibrated on this dataset", fitted[GENERATED]["chroma_power"]),
+    ]
+
+
+def spectrum_figure(
+    first_generator: dict[str, Any], calibrated: dict[str, dict[str, Any]], path: Path
+) -> None:
+    edges = np.array(first_generator["bands"], dtype=np.float64)
+    centres = np.sqrt(edges[:-1] * edges[1:])
+    figure = Figure(figsize=(FIGURE_WIDTH_IN, FIGURE_HEIGHT_IN), layout="constrained")
+    axes = figure.subplots(1, 2, sharey=True)
+    for axis, corpus in zip(axes, CORPUS_NAMES, strict=True):
+        for (title, powers), colour, marker, line in zip(
+            spectrum_profiles(first_generator, calibrated, corpus),
+            SERIES_COLOURS,
+            ("o", "s", "^"),
+            ("-", "--", ":"),
+            strict=True,
+        ):
+            axis.plot(
+                centres,
+                powers,
+                color=colour,
+                marker=marker,
+                markersize=4,
+                linestyle=line,
+                linewidth=1.5,
+                label=title,
+            )
+        axis.axhline(1.0, color=INK, linewidth=0.8)
+        axis.set_xscale("log")
+        axis.set_yscale("log")
+        axis.set_xticks(edges[::2], [f"{edge:.0f}" for edge in edges[::2]])
+        axis.set_xlabel("Spatial frequency (cycles per width)", fontsize=8, color=INK)
+        axis.set_title(CORPUS_NAMES[corpus], fontsize=9, color=INK)
+        style(axis)
+    axes[0].set_ylabel("Colour power / bona fide", fontsize=8, color=INK)
+    axes[0].set_yticks(SPECTRUM_TICKS, [f"{tick:g}" for tick in SPECTRUM_TICKS])
+    axes[0].yaxis.set_minor_formatter(NullFormatter())
+    handles, labels = axes[0].get_legend_handles_labels()
+    figure.legend(handles, labels, loc="outside lower center", ncols=3, fontsize=7, frameon=False)
+    figure.savefig(path)
+
+
+def bootstrap_interval(differences: np.ndarray) -> tuple[float, float]:
+    rng = np.random.default_rng(BOOTSTRAP_SEED)
+    resampled = rng.choice(differences, (BOOTSTRAP_RESAMPLES, differences.size)).mean(axis=1)
+    tail = (1.0 - CONFIDENCE) / 2.0
+    low, high = np.quantile(resampled, [tail, 1.0 - tail])
+    return float(low), float(high)
+
+
+def on_report(pick: Callable[[Report], float]) -> Callable[[Path], float]:
+    return lambda run: pick(report(run))
+
+
+def print_paired_differences(runs: Runs) -> None:
+    """Each pair of training configurations, compared seed by seed."""
+    measures = (
+        ("cross HTER (points)", on_report(hter_of("cross")), 100.0, True),
+        (
+            "cross HTER, bona fide rule",
+            lambda run: bona_fide_rule(run, "cross")["hter"],
+            100.0,
+            True,
+        ),
+        ("intra HTER (points)", on_report(hter_of("intra")), 100.0, True),
+        ("cross AUC", on_report(cross_auc(None)), 1.0, False),
+        ("cross replay AUC", on_report(cross_auc("replay")), 1.0, False),
+    )
+    comparisons = (("synthetic", "real"), ("mixed", "real"), ("mixed", "synthetic"))
+    for source, target in DIRECTIONS:
+        for data, baseline in comparisons:
+            trained, reference = runs[(source, data)], runs[(source, baseline)]
+            seeds = sorted(set(reference) & set(trained))
+            print(f"\n{CORPUS_NAMES[source]} -> {CORPUS_NAMES[target]}, {data} against {baseline}")
+            for title, pick, scale, lower_is_better in measures:
+                differences = scale * np.array(
+                    [pick(trained[s]) - pick(reference[s]) for s in seeds]
+                )
+                low, high = bootstrap_interval(differences)
+                improved = int(np.sum(differences < 0 if lower_is_better else differences > 0))
+                print(
+                    f"  {title:26s} {differences.mean():+8.3f}  "
+                    f"interval {low:+.3f} to {high:+.3f}  improved in {improved}/{len(seeds)}"
+                )
+
+
+def print_spectrum_fit(calibrated: dict[str, dict[str, Any]]) -> None:
+    for corpus in CORPUS_NAMES:
+        statistics = relative_statistics(calibrated[corpus][corpus])
+        gap = np.abs(
+            np.array(statistics[GENERATED]["chroma_power"])
+            / np.array(statistics["replay"]["chroma_power"])
+            - 1.0
+        )
+        name = CORPUS_NAMES[corpus]
+        print(f"\n{name}: calibrated generator within {gap.max():.0%} of real replays per band")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Render every table and figure of the thesis results from results/."
+    )
+    parser.add_argument("--clean", type=Path, default=Path("results/clean"))
+    parser.add_argument("--first-generator-runs", type=Path, default=Path("results/judges"))
+    parser.add_argument(
+        "--first-generator-calibration",
+        type=Path,
+        default=Path("results/calibration-first-generator.json"),
+    )
+    parser.add_argument(
+        "--calibration",
+        type=Path,
+        nargs=2,
+        metavar=("MSU", "REPLAY_MOBILE"),
+        default=[Path("results/calibration.json"), Path("results/calibration-fitted-rm.json")],
+        help="calibration reports of the generator fitted to each dataset",
+    )
+    parser.add_argument("--output", type=Path, default=Path("monographs"))
+    return parser
+
+
+def main() -> None:
+    args = build_parser().parse_args()
+    clean = find_runs(args.clean)
+    first_generator = json.loads(args.first_generator_calibration.read_text())
+    calibrated = {
+        corpus: json.loads(path.read_text())
+        for corpus, path in zip(CORPUS_NAMES, args.calibration, strict=True)
+    }
+    args.output.mkdir(parents=True, exist_ok=True)
+    outputs = {
+        "tab-baseline.tex": baseline_table(clean),
+        "tab-main.tex": main_table(clean),
+        "tab-metrics.tex": metrics_table(clean),
+        "tab-threshold.tex": threshold_table(clean),
+        "tab-ablation.tex": ablation_table(find_runs(args.first_generator_runs)),
+        "tab-calibration.tex": calibration_table(first_generator),
+    }
+    for name, content in outputs.items():
+        (args.output / name).write_text(content)
+    seeds_figure(clean, args.output / "fig-seeds-hter.pdf")
+    spectrum_figure(first_generator, calibrated, args.output / "fig-colour-spectrum.pdf")
+    print(f"wrote {', '.join(outputs)}, fig-seeds-hter.pdf and fig-colour-spectrum.pdf")
+    print_paired_differences(clean)
+    print_spectrum_fit(calibrated)
+
+
+if __name__ == "__main__":
+    main()
