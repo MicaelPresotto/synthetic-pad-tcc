@@ -51,6 +51,25 @@ def eer_threshold(attack_scores: FloatArray, bonafide_scores: FloatArray) -> flo
     return float((thresholds[highest] + thresholds[lowest + 1]) / 2.0)
 
 
+def bpcer_threshold(bonafide_scores: FloatArray, target_bpcer: float) -> float:
+    """Lowest threshold whose BPCER stays at or below the target, a fraction in [0, 1].
+
+    Set from bona fide scores alone, so it does not depend on which attacks a development
+    set happens to hold. It sits midway to the next lower score, as eer_threshold does.
+    """
+    _require_scores(bonafide_scores=bonafide_scores)
+    if not 0.0 <= target_bpcer <= 1.0:
+        raise ValueError(f"target_bpcer must lie in [0, 1], got {target_bpcer}")
+    observed = np.unique(bonafide_scores)
+    within = np.flatnonzero([bpcer(bonafide_scores, t) <= target_bpcer for t in observed])
+    if within.size == 0:
+        return float(np.inf)
+    lowest = within[0]
+    if lowest == 0:
+        return float(observed[0])
+    return float((observed[lowest - 1] + observed[lowest]) / 2.0)
+
+
 def hter(
     development_attack_scores: FloatArray,
     development_bonafide_scores: FloatArray,

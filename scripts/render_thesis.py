@@ -10,7 +10,13 @@ from matplotlib.figure import Figure
 from matplotlib.ticker import NullFormatter
 
 from synthetic_pad.corpora import BONA_FIDE
-from synthetic_pad.evaluation.metrics import classification_metrics
+from synthetic_pad.evaluation.metrics import (
+    acer,
+    apcer,
+    bpcer,
+    bpcer_threshold,
+    classification_metrics,
+)
 
 CORPUS_NAMES = {"msu": "MSU-MFSD", "replay-mobile": "Replay-Mobile"}
 DIRECTIONS = (("msu", "replay-mobile"), ("replay-mobile", "msu"))
@@ -22,6 +28,7 @@ GENERATED = "generated"
 BOOTSTRAP_RESAMPLES = 10_000
 BOOTSTRAP_SEED = 0
 CONFIDENCE = 0.95
+TARGET_BPCER = 0.05
 FIGURE_WIDTH_IN = 6.3
 FIGURE_HEIGHT_IN = 2.6
 SPECTRUM_TICKS = (0.5, 1.0, 2.0, 5.0, 10.0)
@@ -149,13 +156,22 @@ def main_table(runs: Runs) -> str:
     )
 
 
+def partition_scores(run: Path, partition: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Attack scores, bona fide scores and the species of each attack."""
+    scores = json.loads((run / "scores.json").read_text())[partition]
+    attacks = [s for s in scores if s["species"] != BONA_FIDE]
+    return (
+        np.array([s["score"] for s in attacks]),
+        np.array([s["score"] for s in scores if s["species"] == BONA_FIDE]),
+        np.array([s["species"] for s in attacks]),
+    )
+
+
 def scenario_metrics(run: Path, scenario: str) -> dict[str, float]:
     """PAD and general classification metrics of one test partition, at the threshold the
     development partition fixed."""
     section = report(run)[scenario]
-    scores = json.loads((run / "scores.json").read_text())[scenario]
-    attacks = np.array([s["score"] for s in scores if s["species"] != BONA_FIDE])
-    bona_fide = np.array([s["score"] for s in scores if s["species"] == BONA_FIDE])
+    attacks, bona_fide, _ = partition_scores(run, scenario)
     return {
         **{f"apcer {species}": section["by_species"][species]["apcer"] for species in SPECIES},
         "bpcer": section["bpcer"],
@@ -188,6 +204,62 @@ def metrics_table(runs: Runs) -> str:
         "\\textbf{Train $\\rightarrow$ test} & \\textbf{Attacks} & \\textbf{APCER replay} & "
         "\\textbf{APCER print} & \\textbf{BPCER} & \\textbf{Accuracy} & \\textbf{Precision} & "
         "\\textbf{Recall} & \\textbf{F1}",
+        rows,
+    )
+
+
+def bona_fide_rule(run: Path, scenario: str) -> dict[str, float]:
+    """Errors of one test partition at the threshold that keeps the development BPCER at or below
+    TARGET_BPCER, set from the development bona fide alone."""
+    _, development_bona_fide, _ = partition_scores(run, "development")
+    threshold = bpcer_threshold(development_bona_fide, TARGET_BPCER)
+    attacks, bona_fide, species = partition_scores(run, scenario)
+    return {
+        "hter": acer(attacks, bona_fide, threshold),
+        **{f"apcer {kind}": apcer(attacks[species == kind], threshold) for kind in SPECIES},
+        "bpcer": bpcer(bona_fide, threshold),
+    }
+
+
+def threshold_table(runs: Runs) -> str:
+    rows = []
+    for source, target in DIRECTIONS:
+        for index, data in enumerate(CONFIGURATIONS):
+            trained = list(runs[(source, data)].values())
+            cross = [bona_fide_rule(run, "cross") for run in trained]
+            values = [
+                np.mean([hter_of("intra")(report(run)) for run in trained]),
+                np.mean([bona_fide_rule(run, "intra")["hter"] for run in trained]),
+                np.mean([hter_of("cross")(report(run)) for run in trained]),
+                *(
+                    np.mean([errors[column] for errors in cross])
+                    for column in ("hter", "apcer replay", "apcer print", "bpcer")
+                ),
+            ]
+            cells = [
+                arrow(source, target) if index == 0 else "",
+                data.capitalize(),
+                *(f"{100 * value:.1f}" for value in values),
+            ]
+            rows.append("\t\t" + " & ".join(cells) + " \\\\")
+        if source != DIRECTIONS[-1][0]:
+            rows.append("\t\t\\midrule")
+    target = f"{100 * TARGET_BPCER:.0f}\\%"
+    return table(
+        "Error rates (\\%) under two threshold rules: the equal-error (EER) threshold of the "
+        "development set, and the threshold that rejects at most "
+        f"{target} of the development bona fide crops, set without looking at any attack. "
+        "Mean over ten seeds.",
+        "tab:threshold",
+        "Xlccccccc",
+        "& & \\multicolumn{2}{c}{\\textbf{HTER intra}} & "
+        "\\multicolumn{2}{c}{\\textbf{HTER cross}} & "
+        f"\\multicolumn{{3}}{{c}}{{\\textbf{{Cross at BPCER {target}}}}} \\\\\n"
+        "\t\t\\cmidrule(lr){3-4} \\cmidrule(lr){5-6} \\cmidrule(lr){7-9}\n"
+        "\t\t\\textbf{Source $\\rightarrow$ target} & \\textbf{Attacks} & "
+        f"\\textbf{{EER}} & \\textbf{{BPCER {target}}} & "
+        f"\\textbf{{EER}} & \\textbf{{BPCER {target}}} & "
+        "\\textbf{APCER replay} & \\textbf{APCER print} & \\textbf{BPCER}",
         rows,
     )
 
@@ -353,28 +425,38 @@ def bootstrap_interval(differences: np.ndarray) -> tuple[float, float]:
     return float(low), float(high)
 
 
+def on_report(pick: Callable[[Report], float]) -> Callable[[Path], float]:
+    return lambda run: pick(report(run))
+
+
 def print_paired_differences(runs: Runs) -> None:
-    """Each synthetic or mixed detector against the real detector of the same seed."""
+    """Each pair of training configurations, compared seed by seed."""
     measures = (
-        ("cross HTER (points)", hter_of("cross"), 100.0, True),
-        ("intra HTER (points)", hter_of("intra"), 100.0, True),
-        ("cross AUC", cross_auc(None), 1.0, False),
-        ("cross replay AUC", cross_auc("replay"), 1.0, False),
+        ("cross HTER (points)", on_report(hter_of("cross")), 100.0, True),
+        (
+            "cross HTER, bona fide rule",
+            lambda run: bona_fide_rule(run, "cross")["hter"],
+            100.0,
+            True,
+        ),
+        ("intra HTER (points)", on_report(hter_of("intra")), 100.0, True),
+        ("cross AUC", on_report(cross_auc(None)), 1.0, False),
+        ("cross replay AUC", on_report(cross_auc("replay")), 1.0, False),
     )
+    comparisons = (("synthetic", "real"), ("mixed", "real"), ("mixed", "synthetic"))
     for source, target in DIRECTIONS:
-        real = runs[(source, "real")]
-        for data in ("synthetic", "mixed"):
-            trained = runs[(source, data)]
-            seeds = sorted(set(real) & set(trained))
-            print(f"\n{CORPUS_NAMES[source]} -> {CORPUS_NAMES[target]}, {data} against real")
+        for data, baseline in comparisons:
+            trained, reference = runs[(source, data)], runs[(source, baseline)]
+            seeds = sorted(set(reference) & set(trained))
+            print(f"\n{CORPUS_NAMES[source]} -> {CORPUS_NAMES[target]}, {data} against {baseline}")
             for title, pick, scale, lower_is_better in measures:
                 differences = scale * np.array(
-                    [pick(report(trained[s])) - pick(report(real[s])) for s in seeds]
+                    [pick(trained[s]) - pick(reference[s]) for s in seeds]
                 )
                 low, high = bootstrap_interval(differences)
                 improved = int(np.sum(differences < 0 if lower_is_better else differences > 0))
                 print(
-                    f"  {title:22s} {differences.mean():+8.3f}  "
+                    f"  {title:26s} {differences.mean():+8.3f}  "
                     f"interval {low:+.3f} to {high:+.3f}  improved in {improved}/{len(seeds)}"
                 )
 
@@ -427,6 +509,7 @@ def main() -> None:
         "tab-baseline.tex": baseline_table(clean),
         "tab-main.tex": main_table(clean),
         "tab-metrics.tex": metrics_table(clean),
+        "tab-threshold.tex": threshold_table(clean),
         "tab-ablation.tex": ablation_table(find_runs(args.first_generator_runs)),
         "tab-calibration.tex": calibration_table(first_generator),
     }
