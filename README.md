@@ -177,6 +177,10 @@ The noise is estimated on luma with Immerkaer's (1996) estimator, in grey levels
 uv run python scripts/measure_noise.py
 ```
 
+`--synthetic-per-face K` renders K synthetic attacks from each bona fide training crop
+instead of one. Copy k uses the generator seed plus k × 1000, so each copy draws its own
+artifacts, and K = 1 reproduces the single-copy runs exactly.
+
 `explain_judge.py` shows where a trained judge looks. It computes Grad-CAM of the
 attack logit over the test crops of both corpora, split by species, together with one
 synthetic replay rendered from each bona fide test crop. It writes `attention.json`
