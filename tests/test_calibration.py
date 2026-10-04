@@ -12,6 +12,7 @@ from synthetic_pad.calibration import (
     appearance,
     appearance_distance,
     chroma_power,
+    noise_level,
     read_fitted_config,
     tone_statistics,
 )
@@ -107,3 +108,19 @@ class TestReadFittedConfig:
         path = tmp_path / "fitted.json"
         path.write_text(json.dumps({"distance": 0.1, "config": asdict(fitted)}))
         assert read_fitted_config(path) == fitted
+
+
+class TestNoiseLevel:
+    def test_a_flat_image_has_no_noise(self) -> None:
+        assert noise_level(np.full((32, 32, 3), 90, dtype=np.uint8)) == 0.0
+
+    def test_ignores_a_linear_ramp(self) -> None:
+        ramp = np.repeat(np.linspace(20.0, 220.0, SIZE)[None, :, None], SIZE, axis=0)
+        image = np.repeat(ramp, 3, axis=2).astype(np.uint8)
+        assert noise_level(image) < 0.5
+
+    def test_recovers_the_deviation_of_added_grey_noise(self) -> None:
+        rng = np.random.default_rng(20261004)
+        noise = rng.normal(0.0, 5.0, (SIZE, SIZE, 1))
+        image = np.clip(np.rint(128.0 + noise), 0, 255).repeat(3, axis=2).astype(np.uint8)
+        assert noise_level(image) == pytest.approx(5.0, rel=0.05)

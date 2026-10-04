@@ -168,6 +168,14 @@ filmed by cameras with different noise levels, so a judge can learn the noise le
 a camera instead of a recapture. `--noise-real-crops` adds the same noise stage to
 every real training crop too, bona fide and real attacks alike, so that noise no
 longer tells the classes apart.
+`measure_noise.py` prints the evidence for that shortcut: the median noise of the
+training crops of each corpus by species, of the attacks each fitted generator renders
+with and without its noise stage, and of the bona fide crops once they carry that noise.
+The noise is estimated on luma with Immerkaer's (1996) estimator, in grey levels.
+
+```bash
+uv run python scripts/measure_noise.py
+```
 
 `explain_judge.py` shows where a trained judge looks. It computes Grad-CAM of the
 attack logit over the test crops of both corpora, split by species, together with one
@@ -206,10 +214,13 @@ their bootstrap intervals:
 uv run python scripts/render_thesis.py
 ```
 
-It reads the ten-seed runs of `results/clean`, the first-generator runs of
+It reads the ten-seed runs of `results/clean`, the reruns with the noise stage off
+(`results/no-noise`, trained with the `-without-noise` configs in `experiments/`) and
+with noise on every real crop (`results/noise-real-crops`), the first-generator runs of
 `results/judges` and the calibration reports, and writes the `.tex` tables and `.pdf`
 figures into `monographs/`. `ablate_generator.py` writes the `ablation.json` behind the
-stage table: the median score a trained judge gives to attacks rendered with each
+stage tables, run on every synthetic judge of `results/clean` and
+`results/noise-real-crops`: the median score a trained judge gives to attacks rendered with each
 stage of the generator switched on or off.
 
 ```bash
