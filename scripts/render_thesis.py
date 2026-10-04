@@ -36,6 +36,7 @@ SERIES_COLOURS = ("#2a78d6", "#eb6834", "#1baf7a")
 INK = "#52514e"
 GRID = "#d9d8d4"
 SOURCE_LINE = r"{\footnotesize Source: prepared by the author (2026).}"
+NOT_RUN = "--"
 
 type Report = dict[str, Any]
 type Runs = dict[tuple[str, str], dict[int, Path]]
@@ -264,6 +265,53 @@ def threshold_table(runs: Runs) -> str:
     )
 
 
+def percent_mean(runs: dict[int, Path], pick: Callable[[Report], float]) -> str:
+    return f"{100 * measured(runs, pick).mean():.1f}"
+
+
+def noise_table(noise_on: Runs, noise_off: Runs, noise_on_real_crops: Runs) -> str:
+    """Cross-dataset errors with the noise stage of the generator on, off, and applied to every
+    real training crop as well; the real configuration uses no generator when the stage is off."""
+    rows = []
+    for source, target in DIRECTIONS:
+        for index, data in enumerate(CONFIGURATIONS):
+            key = (source, data)
+            hters = [
+                percent_mean(runs[key], hter_of("cross")) if key in runs else NOT_RUN
+                for runs in (noise_on, noise_off, noise_on_real_crops)
+            ]
+            neutral = noise_on_real_crops[key].values()
+            cells = [
+                arrow(source, target) if index == 0 else "",
+                data.capitalize(),
+                *hters,
+                *(
+                    f"{measured(runs[key], cross_auc('replay')).mean():.3f}"
+                    for runs in (noise_on, noise_on_real_crops)
+                ),
+                f"{100 * np.mean([bona_fide_rule(run, 'cross')['hter'] for run in neutral]):.1f}",
+            ]
+            rows.append("\t\t" + " & ".join(cells) + " \\\\")
+        if source != DIRECTIONS[-1][0]:
+            rows.append("\t\t\\midrule")
+    target = f"{100 * TARGET_BPCER:.0f}\\%"
+    return table(
+        "Cross-dataset HTER (\\%) and replay AUC with the noise stage of the generator on, as in "
+        "Table~\\ref{tab:main}, switched off, and applied to every real training crop as well, so "
+        "that the noise level no longer tells the classes apart; the last column uses the "
+        f"BPCER {target} threshold of Table~\\ref{{tab:threshold}}. Mean over ten seeds.",
+        "tab:noise",
+        "Xlcccccc",
+        "& & \\multicolumn{3}{c}{\\textbf{HTER cross}} & "
+        "\\multicolumn{2}{c}{\\textbf{AUC replay cross}} & \\textbf{HTER cross} \\\\\n"
+        "\t\t\\cmidrule(lr){3-5} \\cmidrule(lr){6-7} \\cmidrule(lr){8-8}\n"
+        "\t\t\\textbf{Source $\\rightarrow$ target} & \\textbf{Attacks} & \\textbf{Noise on} & "
+        "\\textbf{Noise off} & \\textbf{On real crops} & \\textbf{Noise on} & "
+        f"\\textbf{{On real crops}} & \\textbf{{BPCER {target}}}",
+        rows,
+    )
+
+
 def score_range(values: Sequence[float]) -> str:
     low, high = f"{min(values):.2f}", f"{max(values):.2f}"
     return low if low == high else f"{low}--{high}"
@@ -429,8 +477,9 @@ def on_report(pick: Callable[[Report], float]) -> Callable[[Path], float]:
     return lambda run: pick(report(run))
 
 
-def print_paired_differences(runs: Runs) -> None:
+def print_paired_differences(title: str, runs: Runs) -> None:
     """Each pair of training configurations, compared seed by seed."""
+    print(f"\n== {title}")
     measures = (
         ("cross HTER (points)", on_report(hter_of("cross")), 100.0, True),
         (
@@ -478,6 +527,10 @@ def build_parser() -> argparse.ArgumentParser:
         description="Render every table and figure of the thesis results from results/."
     )
     parser.add_argument("--clean", type=Path, default=Path("results/clean"))
+    parser.add_argument("--noise-off", type=Path, default=Path("results/no-noise"))
+    parser.add_argument(
+        "--noise-on-real-crops", type=Path, default=Path("results/noise-real-crops")
+    )
     parser.add_argument("--first-generator-runs", type=Path, default=Path("results/judges"))
     parser.add_argument(
         "--first-generator-calibration",
@@ -499,6 +552,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
     clean = find_runs(args.clean)
+    real_only = {key: runs for key, runs in clean.items() if key[1] == "real"}
+    noise_off = {**find_runs(args.noise_off), **real_only}
+    noise_on_real_crops = find_runs(args.noise_on_real_crops)
     first_generator = json.loads(args.first_generator_calibration.read_text())
     calibrated = {
         corpus: json.loads(path.read_text())
@@ -510,6 +566,7 @@ def main() -> None:
         "tab-main.tex": main_table(clean),
         "tab-metrics.tex": metrics_table(clean),
         "tab-threshold.tex": threshold_table(clean),
+        "tab-noise.tex": noise_table(clean, find_runs(args.noise_off), noise_on_real_crops),
         "tab-ablation.tex": ablation_table(find_runs(args.first_generator_runs)),
         "tab-calibration.tex": calibration_table(first_generator),
     }
@@ -518,7 +575,9 @@ def main() -> None:
     seeds_figure(clean, args.output / "fig-seeds-hter.pdf")
     spectrum_figure(first_generator, calibrated, args.output / "fig-colour-spectrum.pdf")
     print(f"wrote {', '.join(outputs)}, fig-seeds-hter.pdf and fig-colour-spectrum.pdf")
-    print_paired_differences(clean)
+    print_paired_differences("noise stage on, as in tab-main", clean)
+    print_paired_differences("noise stage off", noise_off)
+    print_paired_differences("noise on every real training crop", noise_on_real_crops)
     print_spectrum_fit(calibrated)
 
 
