@@ -35,6 +35,7 @@ EVERY_STAGE = [
     {"blur_sigma_px": 1.5},
     {"moire_amplitude": 0.15},
     {"noise_sigma_levels": 4.0},
+    {"screen_min_pitch_px": 1.2, "screen_max_pitch_px": 1.6},
 ]
 
 MEANINGLESS_PARAMETERS = [
@@ -57,6 +58,15 @@ MEANINGLESS_PARAMETERS = [
     ({"glare_intensity": 2.0}, r"\[0, 1\]"),
     ({"glare_extent": 0.0}, "must be positive"),
     ({"moire_cross_weight": -0.5}, "non-negative"),
+    (
+        {"moire_amplitude": 0.0, "screen_min_pitch_px": 2.0, "screen_max_pitch_px": 1.0},
+        "screen_min_pitch_px <= screen_max_pitch_px",
+    ),
+    ({"moire_amplitude": 0.0, "screen_max_pitch_px": 1.0}, "screen_min_pitch_px > 0"),
+    ({"screen_min_pitch_px": 1.0, "screen_max_pitch_px": 1.5}, "either by the screen"),
+    ({"screen_black_matrix": 1.5}, r"\[0, 1\]"),
+    ({"camera_px_per_output_px": 0.0}, "must be positive"),
+    ({"camera_sharpening": -1.0}, "non-negative"),
 ]
 
 
@@ -281,6 +291,42 @@ class TestNoise:
         assert not np.all(attack == 128)
         assert np.array_equal(attack[..., 0], attack[..., 1])
         assert np.array_equal(attack[..., 1], attack[..., 2])
+
+
+class TestScreen:
+    GREY = np.full((224, 224, 3), 150, dtype=np.uint8)
+
+    def photographed(self, image: RgbImage, pitch: float) -> np.ndarray:
+        config = dataclasses.replace(NEUTRAL, screen_min_pitch_px=pitch, screen_max_pitch_px=pitch)
+        return MoireRecaptureGenerator(config).generate(image).astype(np.float64)
+
+    def test_keeps_the_mean_colour(self) -> None:
+        tinted = np.zeros_like(self.GREY)
+        tinted[...] = (180, 90, 40)
+        means = self.photographed(tinted, 1.2).reshape(-1, 3).mean(axis=0)
+        assert np.allclose(means, (180, 90, 40), atol=3.0)
+
+    def test_turns_a_uniform_grey_into_colour_fringes(self) -> None:
+        attack = self.photographed(self.GREY, 1.7)
+        assert (attack[..., 0] - attack[..., 1]).std() > 5.0
+
+    def test_camera_sharpening_restores_detail(self, face_like_image: RgbImage) -> None:
+        def detail(sharpening: float) -> float:
+            config = dataclasses.replace(
+                NEUTRAL,
+                screen_min_pitch_px=0.8,
+                screen_max_pitch_px=0.8,
+                camera_sharpening=sharpening,
+            )
+            attack = MoireRecaptureGenerator(config).generate(face_like_image)
+            return float(np.abs(np.diff(attack.astype(np.float64), axis=1)).mean())
+
+        assert detail(2.0) > detail(0.0)
+
+    def test_fringes_fade_as_the_screen_pixels_shrink_below_the_sensor_pixels(self) -> None:
+        coarse = (self.photographed(self.GREY, 1.7)[..., 0]).std()
+        fine = (self.photographed(self.GREY, 0.8)[..., 0]).std()
+        assert fine < coarse / 3.0
 
 
 class TestNoiseMatchedToBonaFide:

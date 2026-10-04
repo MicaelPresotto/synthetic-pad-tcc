@@ -19,6 +19,7 @@ STAGE_OFF = {
     "glare": {"glare_intensity": 0.0},
     "lens": {"blur_sigma_px": 0.0},
     "moire": {"moire_amplitude": 0.0},
+    "screen": {"screen_min_pitch_px": 0.0, "screen_max_pitch_px": 0.0},
     "noise": {"noise_sigma_levels": 0.0, "noise_to_bona_fide": 0.0},
 }
 
