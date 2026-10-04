@@ -185,7 +185,38 @@ Attacks are scored by a liveness detector and evaluated using standard PAD metri
   whole interval of thresholds equalises the two error rates there, its midpoint
 - **AUC** — threshold-independent measure of separability
 
-Metric definitions follow ISO/IEC 30107-3.
+Metric definitions follow ISO/IEC 30107-3. Accuracy, precision, recall and F1, with the
+attack as the positive class, are reported at the same development threshold.
+
+### Reproducing the thesis
+
+Every table and figure of the results chapter is rendered from `results/` by one
+script, which also prints the paired seed-by-seed differences the text quotes, with
+their bootstrap intervals:
+
+```bash
+uv run python scripts/render_thesis.py
+```
+
+It reads the ten-seed runs of `results/clean`, the first-generator runs of
+`results/judges` and the calibration reports, and writes the `.tex` tables and `.pdf`
+figures into `monographs/`. `ablate_generator.py` writes the `ablation.json` behind the
+stage table: the median score a trained judge gives to attacks rendered with each
+stage of the generator switched on or off.
+
+```bash
+uv run python scripts/ablate_generator.py --run results/clean/msu-synthetic-seed1
+```
+
+The first generator, tuned by eye, is no longer the code on `main`: its experiments
+were run at the tag `first-generator`. The ablation and calibration scripts run there
+unchanged, against that checkout's package:
+
+```bash
+git worktree add ../first-generator first-generator
+uv run --project ../first-generator python scripts/ablate_generator.py --run results/judges/msu-synthetic-seed1
+uv run --project ../first-generator python ../first-generator/scripts/calibrate_generator.py --output results/calibration-first-generator.json
+```
 
 ## Datasets
 
@@ -229,7 +260,7 @@ synthetic-pad/
 │   ├── calibration.py # image statistics that match generated attacks to real ones
 │   ├── corpora.py     # MSU-MFSD and Replay-Mobile readers: partitions, attack species, face boxes
 │   └── frames.py      # face crops sampled from the corpus videos, and their partitions
-├── scripts/           # command line tools: visual tuning, batch generation
+├── scripts/           # command line tools: tuning, generation, training, the thesis assets
 ├── experiments/       # generator settings fitted to one corpus each
 ├── tests/             # mirrors src/
 ├── data/              # datasets (gitignored)
