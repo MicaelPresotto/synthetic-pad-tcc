@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from synthetic_pad.domain import RgbImage
-from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
+from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator, noise_level
 
 NEUTRAL = MoireConfig(
     tilt_x=0.0,
@@ -49,10 +49,20 @@ MEANINGLESS_PARAMETERS = [
     ({"saturation": -0.5}, "non-negative"),
     ({"moire_amplitude": -0.1}, "non-negative"),
     ({"noise_sigma_levels": -1.0}, "non-negative"),
+    ({"noise_to_bona_fide": -1.0}, "non-negative"),
+    (
+        {"noise_sigma_levels": 2.0, "noise_to_bona_fide": 1.2},
+        "either noise_sigma_levels or noise_to_bona_fide",
+    ),
     ({"glare_intensity": 2.0}, r"\[0, 1\]"),
     ({"glare_extent": 0.0}, "must be positive"),
     ({"moire_cross_weight": -0.5}, "non-negative"),
 ]
+
+
+def grey_with_noise(sigma_levels: float, size: int = 224) -> RgbImage:
+    noise = np.random.default_rng(20261004).normal(0.0, sigma_levels, (size, size, 1))
+    return np.clip(np.rint(128.0 + noise), 0, 255).repeat(3, axis=2).astype(np.uint8)
 
 
 def at_fixed_frequency(config: MoireConfig, cycles_per_width: float) -> MoireConfig:
@@ -271,6 +281,38 @@ class TestNoise:
         assert not np.all(attack == 128)
         assert np.array_equal(attack[..., 0], attack[..., 1])
         assert np.array_equal(attack[..., 1], attack[..., 2])
+
+
+class TestNoiseMatchedToBonaFide:
+    def matched(self, ratio: float) -> MoireRecaptureGenerator:
+        return MoireRecaptureGenerator(dataclasses.replace(NEUTRAL, noise_to_bona_fide=ratio))
+
+    def test_brings_the_noise_of_the_attack_to_the_ratio_of_the_bona_fide(self) -> None:
+        bona_fide = grey_with_noise(3.0)
+        attack = self.matched(1.5).generate(bona_fide)
+        assert noise_level(attack) == pytest.approx(1.5 * noise_level(bona_fide), rel=0.1)
+
+    def test_adds_nothing_when_the_attack_is_already_noisy_enough(self) -> None:
+        bona_fide = grey_with_noise(3.0)
+        assert np.array_equal(self.matched(0.5).generate(bona_fide), bona_fide)
+
+    def test_applies_to_real_crops_through_the_sensor_noise_alone(self) -> None:
+        crop = grey_with_noise(3.0)
+        noisy = self.matched(2.0).add_sensor_noise(crop)
+        assert noise_level(noisy) == pytest.approx(2.0 * noise_level(crop), rel=0.1)
+
+
+class TestNoiseLevel:
+    def test_a_flat_image_has_no_noise(self) -> None:
+        assert noise_level(np.full((32, 32, 3), 90, dtype=np.uint8)) == 0.0
+
+    def test_ignores_a_linear_ramp(self) -> None:
+        ramp = np.repeat(np.linspace(20.0, 220.0, 224)[None, :, None], 224, axis=0)
+        image = np.repeat(ramp, 3, axis=2).astype(np.uint8)
+        assert noise_level(image) < 0.5
+
+    def test_recovers_the_deviation_of_added_grey_noise(self) -> None:
+        assert noise_level(grey_with_noise(5.0)) == pytest.approx(5.0, rel=0.05)
 
 
 class TestSensorNoise:

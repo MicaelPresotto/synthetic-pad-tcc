@@ -21,7 +21,6 @@ WHITE_QUANTILE = 0.99
 CHROMA_BANDS = (4, 8, 12, 16, 24, 32, 48, 64, 80, 96, 112)
 LEVELS = ("black_level", "white_level")
 LEVEL_STEP = 0.05
-NOISE_KERNEL = np.array([[1, -2, 1], [-2, 4, -2], [1, -2, 1]], dtype=np.float64)
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,15 +47,6 @@ def tone_statistics(image: RgbImage) -> dict[str, float]:
         "white_level": float(np.quantile(luma, WHITE_QUANTILE)),
         "sharpness": float(cv2.Laplacian(luma, cv2.CV_64F).var()),
     }
-
-
-def noise_level(image: RgbImage) -> float:
-    """Standard deviation of the noise of luma, in grey levels, by the estimator of
-    Immerkaer (1996); its kernel cancels smooth structure, but fine texture still adds to it."""
-    ensure_rgb_uint8(image)
-    luma = image.astype(np.float64) @ LUMA_WEIGHTS
-    response = cv2.filter2D(luma, cv2.CV_64F, NOISE_KERNEL)[1:-1, 1:-1]
-    return float(np.sqrt(np.pi / 2.0) * np.abs(response).sum() / (6.0 * response.size))
 
 
 def chroma_power(image: RgbImage, bands: Sequence[int] = CHROMA_BANDS) -> BandPowers:
