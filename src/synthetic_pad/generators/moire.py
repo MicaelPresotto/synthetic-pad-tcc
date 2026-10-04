@@ -24,6 +24,7 @@ GLARE_CENTRE_X_RANGE = (0.15, 0.85)
 GLARE_CENTRE_Y_RANGE = (0.05, 0.55)
 GLARE_ASPECT = 0.32
 GLARE_ANGLE_DEG = -35.0
+NEUTRAL_TONE = (1.0, 1.0, 0.0, 1.0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +147,8 @@ class MoireRecaptureGenerator(AttackGenerator):
 
     def _apply_tone(self, canvas: FloatImage, rng: np.random.Generator) -> FloatImage:
         cfg = self._config
+        if (cfg.contrast, cfg.saturation, cfg.black_level, cfg.white_level) == NEUTRAL_TONE:
+            return canvas
         contrast = cfg.contrast * self._jitter_magnitude(rng)
         saturation = cfg.saturation * self._jitter_magnitude(rng)
         toned = np.clip((canvas - 0.5) * contrast + 0.5, 0.0, 1.0)

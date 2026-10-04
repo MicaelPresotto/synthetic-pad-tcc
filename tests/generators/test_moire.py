@@ -131,6 +131,13 @@ class TestArtifacts:
         attack = MoireRecaptureGenerator(NEUTRAL).generate(face_like_image)
         np.testing.assert_array_equal(attack, face_like_image)
 
+    def test_the_neutral_config_stays_the_identity_with_variation(
+        self, face_like_image: RgbImage
+    ) -> None:
+        config = dataclasses.replace(NEUTRAL, variation=0.25)
+        attack = MoireRecaptureGenerator(config).generate(face_like_image)
+        np.testing.assert_array_equal(attack, face_like_image)
+
     @pytest.mark.parametrize("override", EVERY_STAGE)
     def test_every_stage_changes_the_image(
         self, face_like_image: RgbImage, override: dict[str, Any]
