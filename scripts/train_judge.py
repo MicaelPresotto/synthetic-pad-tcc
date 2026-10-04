@@ -27,11 +27,17 @@ def labels(samples: list[CropSample]) -> np.ndarray:
     return np.array([sample.is_attack for sample in samples])
 
 
+def fraction_of(count: int, fraction: float, seed: int) -> np.ndarray:
+    return np.random.default_rng(seed).choice(count, round(fraction * count), replace=False)
+
+
 def training_set(
     samples: list[CropSample],
     data: str,
     generators: list[MoireRecaptureGenerator],
     noise_real_crops: bool,
+    synthetic_fraction: float,
+    seed: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     bona_fide = read_crops([sample for sample in samples if not sample.is_attack])
     real = [bona_fide]
@@ -39,8 +45,9 @@ def training_set(
         real.append(read_crops([sample for sample in samples if sample.is_attack]))
     synthetic = []
     if data in ("synthetic", "mixed"):
+        sources = bona_fide[sorted(fraction_of(len(bona_fide), synthetic_fraction, seed))]
         synthetic = [
-            np.stack([generator.generate(image) for image in bona_fide]) for generator in generators
+            np.stack([generator.generate(image) for image in sources]) for generator in generators
         ]
     if noise_real_crops:
         noise = generators[0].add_sensor_noise
@@ -97,6 +104,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="synthetic attacks rendered from each bona fide training crop, each with its own "
         "realization of the artifacts",
     )
+    parser.add_argument(
+        "--synthetic-fraction",
+        type=float,
+        default=1.0,
+        help="fraction of the bona fide training crops, drawn at random, that synthetic "
+        "attacks are rendered from; below 1 the judge sees fewer synthetic than bona fide",
+    )
     parser.add_argument("--frames", type=Path, default=Path("data/frames"))
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--architecture", choices=sorted(ARCHITECTURES), default="resnet18")
@@ -112,6 +126,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.synthetic_per_face < 1:
         parser.error(f"--synthetic-per-face must be at least 1, got {args.synthetic_per_face}")
+    if not 0 < args.synthetic_fraction <= 1:
+        parser.error(f"--synthetic-fraction must be in (0, 1], got {args.synthetic_fraction}")
     config = TrainingConfig(
         architecture=args.architecture,
         pretrained=not args.no_pretrained,
@@ -127,7 +143,12 @@ def main() -> None:
         for copy in range(args.synthetic_per_face)
     ]
     images, is_attack = training_set(
-        select(source, "train"), args.data, generators, args.noise_real_crops
+        select(source, "train"),
+        args.data,
+        generators,
+        args.noise_real_crops,
+        args.synthetic_fraction,
+        args.seed,
     )
 
     detector, losses = train_resnet(images, is_attack, config, args.device)
@@ -152,6 +173,7 @@ def main() -> None:
             ),
             "noise_real_crops": args.noise_real_crops,
             "synthetic_per_face": args.synthetic_per_face,
+            "synthetic_fraction": args.synthetic_fraction,
             "config": asdict(config),
             "device": args.device,
             "torch": torch.__version__,
