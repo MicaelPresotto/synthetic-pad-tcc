@@ -266,6 +266,36 @@ class TestNoise:
         assert np.array_equal(attack[..., 1], attack[..., 2])
 
 
+class TestSensorNoise:
+    GREY = np.full((64, 64, 3), 128, dtype=np.uint8)
+
+    def noisy(self, sigma_levels: float, image: RgbImage | None = None) -> RgbImage:
+        config = dataclasses.replace(MoireConfig(), noise_sigma_levels=sigma_levels)
+        return MoireRecaptureGenerator(config).add_sensor_noise(
+            self.GREY if image is None else image
+        )
+
+    def test_spreads_the_levels_by_the_configured_sigma(self) -> None:
+        deviation = self.noisy(4.0).astype(np.float64) - 128.0
+        assert abs(deviation.mean()) < 0.5
+        assert 3.5 < deviation.std() < 4.5
+
+    def test_applies_no_other_stage(self) -> None:
+        assert np.array_equal(self.noisy(0.0), self.GREY)
+
+    def test_adds_the_same_noise_to_every_channel(self) -> None:
+        noisy = self.noisy(4.0)
+        assert np.array_equal(noisy[..., 0], noisy[..., 1])
+        assert np.array_equal(noisy[..., 1], noisy[..., 2])
+
+    def test_repeats_itself_on_the_same_image(self) -> None:
+        assert np.array_equal(self.noisy(4.0), self.noisy(4.0))
+
+    def test_draws_new_noise_for_a_different_image(self) -> None:
+        darker = np.full((64, 64, 3), 100, dtype=np.uint8)
+        assert not np.array_equal(self.noisy(4.0) - 128, self.noisy(4.0, darker) - 100)
+
+
 class TestConfig:
     @pytest.mark.parametrize(("override", "message"), MEANINGLESS_PARAMETERS)
     def test_rejects_meaningless_parameters(self, override: dict[str, Any], message: str) -> None:

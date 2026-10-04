@@ -27,15 +27,21 @@ def labels(samples: list[CropSample]) -> np.ndarray:
 
 
 def training_set(
-    samples: list[CropSample], data: str, generator: MoireRecaptureGenerator
+    samples: list[CropSample],
+    data: str,
+    generator: MoireRecaptureGenerator,
+    noise_real_crops: bool,
 ) -> tuple[np.ndarray, np.ndarray]:
     bona_fide = read_crops([sample for sample in samples if not sample.is_attack])
-    attacks = []
+    real = [bona_fide]
     if data in ("real", "mixed"):
-        attacks.append(read_crops([sample for sample in samples if sample.is_attack]))
+        real.append(read_crops([sample for sample in samples if sample.is_attack]))
+    synthetic = []
     if data in ("synthetic", "mixed"):
-        attacks.append(np.stack([generator.generate(image) for image in bona_fide]))
-    images = np.concatenate([bona_fide, *attacks])
+        synthetic.append(np.stack([generator.generate(image) for image in bona_fide]))
+    if noise_real_crops:
+        real = [np.stack([generator.add_sensor_noise(image) for image in group]) for group in real]
+    images = np.concatenate([*real, *synthetic])
     is_attack = np.arange(len(images)) >= len(bona_fide)
     return images, is_attack
 
@@ -74,6 +80,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="fitted moire settings from calibrate_generator.py --fit; defaults otherwise",
     )
+    parser.add_argument(
+        "--noise-real-crops",
+        action="store_true",
+        help="add the generator's sensor noise to every real training crop as well, so that "
+        "the noise level cannot tell a synthetic attack from a real crop",
+    )
     parser.add_argument("--frames", type=Path, default=Path("data/frames"))
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--architecture", choices=sorted(ARCHITECTURES), default="resnet18")
@@ -97,7 +109,9 @@ def main() -> None:
     target_corpus = next(corpus for corpus in CORPORA if corpus != args.train_corpus)
     fitted = read_fitted_config(args.generator_config) if args.generator_config else MoireConfig()
     generator = MoireRecaptureGenerator(replace(fitted, seed=args.seed))
-    images, is_attack = training_set(select(source, "train"), args.data, generator)
+    images, is_attack = training_set(
+        select(source, "train"), args.data, generator, args.noise_real_crops
+    )
 
     detector, losses = train_resnet(images, is_attack, config, args.device)
     detector.save(args.output / "judge.pt")
@@ -114,7 +128,10 @@ def main() -> None:
         "training": {
             "corpus": args.train_corpus,
             "data": args.data,
-            "generator": dict(generator.describe()) if args.data != "real" else None,
+            "generator": (
+                dict(generator.describe()) if args.data != "real" or args.noise_real_crops else None
+            ),
+            "noise_real_crops": args.noise_real_crops,
             "config": asdict(config),
             "device": args.device,
             "torch": torch.__version__,

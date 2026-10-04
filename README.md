@@ -163,6 +163,12 @@ recapture rendered from each bona fide training crop, and `mixed` uses both. The
 development partition stays real in all three, so only the training data changes
 between them.
 
+The generator adds sensor noise to every attack it renders, and the two corpora were
+filmed by cameras with different noise levels, so a judge can learn the noise level of
+a camera instead of a recapture. `--noise-real-crops` adds the same noise stage to
+every real training crop too, bona fide and real attacks alike, so that noise no
+longer tells the classes apart.
+
 `explain_judge.py` shows where a trained judge looks. It computes Grad-CAM of the
 attack logit over the test crops of both corpora, split by species, together with one
 synthetic replay rendered from each bona fide test crop. It writes `attention.json`
