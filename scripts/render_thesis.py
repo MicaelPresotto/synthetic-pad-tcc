@@ -393,6 +393,64 @@ def noise_ablation_table(noise_on: Runs, noise_on_real_crops: Runs) -> str:
     )
 
 
+def synthetic_ratio(run: Path) -> float:
+    """Synthetic attacks per bona fide training crop; runs from before the ratio flags had one."""
+    training = report(run)["training"]
+    return float(training.get("synthetic_per_face", 1) * training.get("synthetic_fraction", 1.0))
+
+
+def runs_by_ratio(folders: Sequence[Path]) -> dict[float, Runs]:
+    by_ratio = {}
+    for folder in folders:
+        runs = find_runs(folder)
+        (ratio,) = {
+            synthetic_ratio(run)
+            for (_, data), seeds in runs.items()
+            if data != "real"
+            for run in seeds.values()
+        }
+        by_ratio[ratio] = runs
+    return dict(sorted(by_ratio.items()))
+
+
+def ratio_table(real: Runs, by_ratio: dict[float, Runs]) -> str:
+    measures: tuple[tuple[str, Callable[[dict[int, Path]], str]], ...] = (
+        ("Replay AUC", lambda runs: f"{measured(runs, cross_auc('replay')).mean():.3f}"),
+        ("HTER (\\%)", lambda runs: percent_mean(runs, hter_of("cross"))),
+    )
+    rows = []
+    for source, target in DIRECTIONS:
+        for index, (data, (title, value_of)) in enumerate(
+            (data, measure) for data in ("synthetic", "mixed") for measure in measures
+        ):
+            cells = [
+                arrow(source, target) if index == 0 else "",
+                data.capitalize() if index % len(measures) == 0 else "",
+                title,
+                value_of(real[(source, "real")]),
+                *(value_of(runs[(source, data)]) for runs in by_ratio.values()),
+            ]
+            rows.append("\t\t" + " & ".join(cells) + " \\\\")
+        if source != DIRECTIONS[-1][0]:
+            rows.append("\t\t\\midrule")
+    columns = len(by_ratio)
+    ratios = " & ".join(f"\\textbf{{{ratio:g}}}" for ratio in by_ratio)
+    return table(
+        "Cross-dataset replay AUC and HTER (\\%) against the number of synthetic attacks rendered "
+        "per bona fide training crop, with the noise of the generator on every real training crop "
+        "as well; the real column trains on the real attacks alone. The loss weighs both classes "
+        "equally, so in the synthetic configuration the ratio changes how many distinct attacks "
+        "the detector sees, not their total weight. Mean over ten seeds.",
+        "tab:ratio",
+        f"Xll{'c' * (columns + 1)}",
+        f"& & & & \\multicolumn{{{columns}}}{{c}}{{\\textbf{{Synthetic per bona fide}}}} \\\\\n"
+        f"\t\t\\cmidrule(lr){{5-{columns + 4}}}\n"
+        "\t\t\\textbf{Source $\\rightarrow$ target} & \\textbf{Attacks} & \\textbf{Measure} & "
+        f"\\textbf{{Real}} & {ratios}",
+        rows,
+    )
+
+
 def relative_statistics(section: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Ratios of each group to the bona fide crops. Reports written before the calibration
     search, such as the first generator's, nest them under a single key."""
@@ -570,6 +628,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--noise-on-real-crops", type=Path, default=Path("results/noise-real-crops")
     )
+    parser.add_argument(
+        "--synthetic-ratios",
+        type=Path,
+        nargs="+",
+        default=[
+            Path("results/fraction-0.1"),
+            Path("results/fraction-0.25"),
+            Path("results/fraction-0.5"),
+            Path("results/noise-real-crops"),
+            Path("results/copies-3"),
+            Path("results/copies-5"),
+        ],
+        help="runs with noise on every real crop, one folder per synthetic-per-bona-fide ratio",
+    )
     parser.add_argument("--first-generator-runs", type=Path, default=Path("results/judges"))
     parser.add_argument(
         "--first-generator-calibration",
@@ -594,6 +666,7 @@ def main() -> None:
     real_only = {key: runs for key, runs in clean.items() if key[1] == "real"}
     noise_off = {**find_runs(args.noise_off), **real_only}
     noise_on_real_crops = find_runs(args.noise_on_real_crops)
+    by_ratio = runs_by_ratio(args.synthetic_ratios)
     first_generator = json.loads(args.first_generator_calibration.read_text())
     calibrated = {
         corpus: json.loads(path.read_text())
@@ -608,6 +681,7 @@ def main() -> None:
         "tab-noise.tex": noise_table(clean, find_runs(args.noise_off), noise_on_real_crops),
         "tab-ablation.tex": ablation_table(find_runs(args.first_generator_runs)),
         "tab-ablation-noise.tex": noise_ablation_table(clean, noise_on_real_crops),
+        "tab-ratio.tex": ratio_table(noise_on_real_crops, by_ratio),
         "tab-calibration.tex": calibration_table(first_generator),
     }
     for name, content in outputs.items():
@@ -618,6 +692,14 @@ def main() -> None:
     print_paired_differences("noise stage on, as in tab-main", clean)
     print_paired_differences("noise stage off", noise_off)
     print_paired_differences("noise on every real training crop", noise_on_real_crops)
+    real_on_real_crops = {
+        key: runs for key, runs in noise_on_real_crops.items() if key[1] == "real"
+    }
+    for ratio, runs in by_ratio.items():
+        if ratio != 1.0:
+            print_paired_differences(
+                f"{ratio:g} synthetic per bona fide", {**runs, **real_on_real_crops}
+            )
     print_spectrum_fit(calibrated)
 
 
