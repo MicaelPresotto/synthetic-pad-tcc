@@ -91,6 +91,7 @@ def fit(
     rng: np.random.Generator,
     base: MoireConfig,
     draw: Drawer,
+    base_competes: bool,
 ) -> dict[str, object]:
     """Random search for the settings whose attacks look most like the corpus's replays.
 
@@ -100,7 +101,7 @@ def fit(
     """
     target = appearance(groups[REPLAY])
     default_distance = appearance_distance(appearance(render(base, groups[BONA_FIDE])), target)
-    best, best_distance = base, default_distance
+    best, best_distance = (base, default_distance) if base_competes else (base, math.inf)
     for trial in range(trials):
         candidate = draw(rng, base)
         distance = appearance_distance(appearance(render(candidate, groups[BONA_FIDE])), target)
@@ -170,7 +171,7 @@ def main() -> None:
     if args.fit:
         groups = sample_by_species(select(partitions[args.fit], "train"), args.crops, rng)
         draw = draw_screen_candidate if args.screen else draw_candidate
-        fitted = fit(args.fit, groups, args.trials, rng, base, draw)
+        fitted = fit(args.fit, groups, args.trials, rng, base, draw, base_competes=not args.screen)
         if args.screen:
             fitted["fitted_to"] = f"{fitted['fitted_to']}, screen and camera stage"
         args.output.write_text(json.dumps(fitted, indent=2) + "\n")
