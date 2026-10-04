@@ -49,6 +49,7 @@ changes the result:
 |---|---|---|---|
 | 1 | Geometry | The camera is never square-on to the screen, so the image arrives keystoned and slightly rolled | `tilt_x`, `tilt_y` (fractions of the perpendicular dimension), `rotation_deg` |
 | 2 | Tone | The panel's tone curve and gamut replace the scene's: real replays come out more saturated and, on MSU-MFSD, contrastier than the bona fide captures | `contrast`, `saturation`, `black_level`, `white_level` |
+| 2b | Screen and camera | Alternative to stage 5: the image shown on an RGB-stripe screen and photographed onto a Bayer sensor finer than the output, then reduced to it; off by default | `screen_min_pitch_px`, `screen_max_pitch_px` (screen pixel period in sensor pixels), `screen_max_rotation_deg`, `screen_keystone`, `screen_black_matrix`, `camera_psf_sigma_px`, `camera_px_per_output_px` |
 | 3 | Glare | A light source in the room mirrored on the screen glass | `glare_intensity`, `glare_extent` (fraction of the image width) |
 | 4 | Lens | Defocus and the finite pixel fill factor; off by default, since real replays measure sharper than bona fide | `blur_sigma_px` |
 | 5 | Moiré | The screen's pixel grid beating against the sensor's | `moire_amplitude`, `moire_min_cycles_per_width`, `moire_max_cycles_per_width`, `moire_max_angle_deg`, `moire_chroma_shift_rad`, `moire_cross_weight` |
@@ -92,6 +93,16 @@ contributed almost nothing for four extra parameters and a nested loop, so both 
 out. What survives is one sinusoid per grating direction. If the detector later shows
 those terms matter, they come back with a measurement behind them.
 
+**Or the moiré is simulated rather than drawn.** Stage 2b takes the opposite route to
+stage 5 and builds both grids. Each screen pixel becomes three subpixel columns, red,
+green and blue, with a dimmed row for the black matrix between pixel rows. The screen is
+rotated in its plane and slightly off-parallel, so its pitch drifts across the frame,
+blurred by a Gaussian lens, sampled by an RGGB Bayer sensor and demosaiced bilinearly, and
+the capture is reduced to the output size by area averaging. The fringes then come out of
+the aliasing between the grids: their frequency, angle and colour follow from the pitch and
+rotation drawn for each attack, they curve where the pitch drifts, and they fade where the
+image is dark. A configuration uses one moiré model or the other, never both.
+
 Every stage switches off through its own parameter, so the neutral configuration is the
 identity function — which is what makes an ablation over the individual artifacts
 possible. Parameters are tuned visually against a synthetic test chart or a real face:
@@ -133,6 +144,9 @@ one corpus uses a generator that has only ever seen that corpus.
 ```bash
 uv run python scripts/calibrate_generator.py --fit replay-mobile --trials 250 --output experiments/moire-fitted-to-replay-mobile.json
 ```
+
+`--screen` fits the screen and camera stage instead, on top of `--generator-config`, whose
+other settings it keeps, so that the two moiré models differ in the moiré alone.
 
 Once the parameters are settled, one attack is rendered for every bona fide image in a
 folder. The run writes a `manifest.json` next to the attacks recording the exact generator

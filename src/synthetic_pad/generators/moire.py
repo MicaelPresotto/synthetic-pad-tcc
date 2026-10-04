@@ -25,6 +25,8 @@ GLARE_CENTRE_Y_RANGE = (0.05, 0.55)
 GLARE_ASPECT = 0.32
 GLARE_ANGLE_DEG = -35.0
 NEUTRAL_TONE = (1.0, 1.0, 0.0, 1.0)
+SUBPIXELS = 3
+RAW_LEVELS = 65535
 NOISE_SEARCH_CEILING = 4.0
 NOISE_SEARCH_STEPS = 20
 NOISE_KERNEL = np.array([[1, -2, 1], [-2, 4, -2], [1, -2, 1]], dtype=np.float64)
@@ -48,6 +50,13 @@ class MoireConfig:
     moire_max_angle_deg: float = 90.0
     moire_chroma_shift_rad: float = 0.9
     moire_cross_weight: float = 0.45
+    screen_min_pitch_px: float = 0.0
+    screen_max_pitch_px: float = 0.0
+    screen_max_rotation_deg: float = 5.0
+    screen_keystone: float = 0.1
+    screen_black_matrix: float = 0.3
+    camera_psf_sigma_px: float = 0.5
+    camera_px_per_output_px: float = 2.0
     noise_sigma_levels: float = 2.0
     noise_to_bona_fide: float = 0.0
     variation: float = 0.25
@@ -57,6 +66,7 @@ class MoireConfig:
         require_positive(
             contrast=self.contrast,
             glare_extent=self.glare_extent,
+            camera_px_per_output_px=self.camera_px_per_output_px,
             moire_min_cycles_per_width=self.moire_min_cycles_per_width,
         )
         require_non_negative(
@@ -67,9 +77,29 @@ class MoireConfig:
             moire_cross_weight=self.moire_cross_weight,
             noise_sigma_levels=self.noise_sigma_levels,
             noise_to_bona_fide=self.noise_to_bona_fide,
+            screen_min_pitch_px=self.screen_min_pitch_px,
+            screen_max_pitch_px=self.screen_max_pitch_px,
+            screen_max_rotation_deg=self.screen_max_rotation_deg,
+            screen_keystone=self.screen_keystone,
+            camera_psf_sigma_px=self.camera_psf_sigma_px,
+            camera_px_per_output_px=self.camera_px_per_output_px,
             variation=self.variation,
         )
-        require_unit_interval(glare_intensity=self.glare_intensity)
+        require_unit_interval(
+            glare_intensity=self.glare_intensity, screen_black_matrix=self.screen_black_matrix
+        )
+        if self.screen_min_pitch_px > self.screen_max_pitch_px:
+            raise ValueError(
+                "require screen_min_pitch_px <= screen_max_pitch_px, got "
+                f"{self.screen_min_pitch_px} and {self.screen_max_pitch_px}"
+            )
+        if self.screen_max_pitch_px > 0.0 and self.screen_min_pitch_px == 0.0:
+            raise ValueError("a screen needs screen_min_pitch_px > 0")
+        if self.screen_max_pitch_px > 0.0 and self.moire_amplitude > 0.0:
+            raise ValueError(
+                "simulate the moire either by the screen or by sinusoidal fringes: set "
+                "screen_max_pitch_px or moire_amplitude to 0"
+            )
         if self.moire_min_cycles_per_width > self.moire_max_cycles_per_width:
             raise ValueError(
                 "require moire_min_cycles_per_width <= moire_max_cycles_per_width, got "
@@ -99,6 +129,7 @@ class MoireRecaptureGenerator(AttackGenerator):
         canvas: FloatImage = image.astype(np.float64) / 255.0
         canvas = self._apply_geometry(canvas, rng)
         canvas = self._apply_tone(canvas, rng)
+        canvas = self._apply_screen(canvas, rng)
         canvas = self._apply_glare(canvas, rng)
         canvas = self._apply_lens(canvas)
         canvas = self._apply_moire(canvas, rng)
@@ -165,6 +196,55 @@ class MoireRecaptureGenerator(AttackGenerator):
         luma = (toned @ LUMA_WEIGHTS)[..., None]
         coloured = np.clip(luma + saturation * (toned - luma), 0.0, 1.0)
         return _as_float(cfg.black_level + coloured * (cfg.white_level - cfg.black_level))
+
+    def _apply_screen(self, canvas: FloatImage, rng: np.random.Generator) -> FloatImage:
+        """The image shown on an RGB-stripe screen and photographed through a lens onto a Bayer
+        sensor finer than the output, then reduced to the output; the moire is the aliasing
+        between the screen and sensor grids, not a drawn pattern. Pitches are in sensor pixels."""
+        cfg = self._config
+        if cfg.screen_max_pitch_px == 0.0:
+            return canvas
+        height, width = canvas.shape[:2]
+        sensor_size = (
+            round(width * cfg.camera_px_per_output_px),
+            round(height * cfg.camera_px_per_output_px),
+        )
+        pitch = math.exp(
+            rng.uniform(math.log(cfg.screen_min_pitch_px), math.log(cfg.screen_max_pitch_px))
+        )
+        shown_size = (max(1, round(sensor_size[0] / pitch)), max(1, round(sensor_size[1] / pitch)))
+        shown = cv2.resize(
+            canvas,
+            shown_size,
+            interpolation=cv2.INTER_AREA if shown_size[0] < width else cv2.INTER_LINEAR,
+        )
+        screen = _subpixel_layout(_as_float(shown), cfg.screen_black_matrix)
+        subpixels_per_px = SUBPIXELS * shown_size[0] / sensor_size[0]
+        psf_sigma = cfg.camera_psf_sigma_px * self._jitter_magnitude(rng) * subpixels_per_px
+        through_lens = cv2.GaussianBlur(
+            screen.astype(np.float32), (0, 0), sigmaX=psf_sigma, borderType=cv2.BORDER_REFLECT
+        )
+        rotation = math.radians(
+            rng.uniform(-cfg.screen_max_rotation_deg, cfg.screen_max_rotation_deg)
+        )
+        keystone = (
+            rng.uniform(-cfg.screen_keystone, cfg.screen_keystone, 2) * 2.0 / np.array(sensor_size)
+        )
+        on_sensor = cv2.warpPerspective(
+            through_lens,
+            _sensor_to_screen(
+                sensor_size,
+                (screen.shape[1], screen.shape[0]),
+                subpixels_per_px,
+                rotation,
+                keystone,
+            ),
+            sensor_size,
+            flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
+            borderMode=cv2.BORDER_REFLECT,
+        )
+        captured = _through_bayer(_as_float(on_sensor))
+        return _as_float(cv2.resize(captured, (width, height), interpolation=cv2.INTER_AREA))
 
     def _apply_glare(self, canvas: FloatImage, rng: np.random.Generator) -> FloatImage:
         cfg = self._config
@@ -264,6 +344,53 @@ class MoireRecaptureGenerator(AttackGenerator):
             return 1.0
         handedness = 1.0 if rng.random() < 0.5 else -1.0
         return handedness * self._jitter_magnitude(rng)
+
+
+def _subpixel_layout(shown: FloatImage, black_matrix: float) -> FloatImage:
+    """Each screen pixel as SUBPIXELS columns lit in red, green and blue, with its last row
+    dimmed by the black matrix between pixel rows; the mean brightness is kept."""
+    lit = np.repeat(np.repeat(shown, SUBPIXELS, axis=0), SUBPIXELS, axis=1)
+    columns = np.arange(lit.shape[1]) % SUBPIXELS
+    stripes = (columns[:, None] == np.arange(3)[None, :]).astype(np.float64)
+    rows = np.where(np.arange(lit.shape[0]) % SUBPIXELS == SUBPIXELS - 1, 1.0 - black_matrix, 1.0)
+    return _as_float(lit * rows[:, None, None] * stripes[None] * SUBPIXELS / rows.mean())
+
+
+def _sensor_to_screen(
+    sensor_size: tuple[int, int],
+    screen_size: tuple[int, int],
+    subpixels_per_px: float,
+    rotation: float,
+    keystone: np.ndarray[Any, np.dtype[np.float64]],
+) -> np.ndarray[Any, np.dtype[np.float64]]:
+    """Homography from sensor pixels to screen subpixels: the screen is centred, scaled,
+    rotated in its plane, and slightly off-parallel, so the scale drifts across the frame."""
+    sensor_centre = np.array(
+        [[1.0, 0.0, -sensor_size[0] / 2.0], [0.0, 1.0, -sensor_size[1] / 2.0], [0.0, 0.0, 1.0]]
+    )
+    off_parallel = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [keystone[0], keystone[1], 1.0]])
+    cos, sin = math.cos(rotation), math.sin(rotation)
+    scale_and_roll = np.array(
+        [
+            [subpixels_per_px * cos, -subpixels_per_px * sin, 0.0],
+            [subpixels_per_px * sin, subpixels_per_px * cos, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    screen_centre = np.array(
+        [[1.0, 0.0, screen_size[0] / 2.0], [0.0, 1.0, screen_size[1] / 2.0], [0.0, 0.0, 1.0]]
+    )
+    return _as_float(screen_centre @ scale_and_roll @ off_parallel @ sensor_centre)
+
+
+def _through_bayer(on_sensor: FloatImage) -> FloatImage:
+    """Keeps one colour per pixel in an RGGB pattern, as a camera sensor does, and
+    reconstructs the other two by bilinear demosaicing."""
+    mosaic = on_sensor[..., 1].copy()
+    mosaic[0::2, 0::2] = on_sensor[0::2, 0::2, 0]
+    mosaic[1::2, 1::2] = on_sensor[1::2, 1::2, 2]
+    raw = np.rint(np.clip(mosaic, 0.0, 1.0) * RAW_LEVELS).astype(np.uint16)
+    return _as_float(cv2.cvtColor(raw, cv2.COLOR_BayerRGGB2RGB)) / RAW_LEVELS
 
 
 def noise_level(image: RgbImage) -> float:
