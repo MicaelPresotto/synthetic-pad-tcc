@@ -57,6 +57,7 @@ class MoireConfig:
     screen_black_matrix: float = 0.3
     camera_psf_sigma_px: float = 0.5
     camera_px_per_output_px: float = 2.0
+    camera_sharpening: float = 0.0
     noise_sigma_levels: float = 2.0
     noise_to_bona_fide: float = 0.0
     variation: float = 0.25
@@ -82,7 +83,7 @@ class MoireConfig:
             screen_max_rotation_deg=self.screen_max_rotation_deg,
             screen_keystone=self.screen_keystone,
             camera_psf_sigma_px=self.camera_psf_sigma_px,
-            camera_px_per_output_px=self.camera_px_per_output_px,
+            camera_sharpening=self.camera_sharpening,
             variation=self.variation,
         )
         require_unit_interval(
@@ -243,7 +244,7 @@ class MoireRecaptureGenerator(AttackGenerator):
             flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
             borderMode=cv2.BORDER_REFLECT,
         )
-        captured = _through_bayer(_as_float(on_sensor))
+        captured = _as_video(_through_bayer(_as_float(on_sensor)), cfg.camera_sharpening)
         return _as_float(cv2.resize(captured, (width, height), interpolation=cv2.INTER_AREA))
 
     def _apply_glare(self, canvas: FloatImage, rng: np.random.Generator) -> FloatImage:
@@ -385,12 +386,27 @@ def _sensor_to_screen(
 
 def _through_bayer(on_sensor: FloatImage) -> FloatImage:
     """Keeps one colour per pixel in an RGGB pattern, as a camera sensor does, and
-    reconstructs the other two by bilinear demosaicing."""
+    reconstructs the other two by edge-aware demosaicing."""
     mosaic = on_sensor[..., 1].copy()
     mosaic[0::2, 0::2] = on_sensor[0::2, 0::2, 0]
     mosaic[1::2, 1::2] = on_sensor[1::2, 1::2, 2]
     raw = np.rint(np.clip(mosaic, 0.0, 1.0) * RAW_LEVELS).astype(np.uint16)
-    return _as_float(cv2.cvtColor(raw, cv2.COLOR_BayerRGGB2RGB)) / RAW_LEVELS
+    return _as_float(cv2.cvtColor(raw, cv2.COLOR_BayerRGGB2RGB_EA)) / RAW_LEVELS
+
+
+def _as_video(captured: FloatImage, sharpening: float) -> FloatImage:
+    """What the camera records: luma sharpened by an unsharp mask of one sensor pixel, and the
+    colour kept at half the resolution in each direction, as 4:2:0 video encodes it."""
+    height, width = captured.shape[:2]
+    luma_chroma = cv2.cvtColor(captured.astype(np.float32), cv2.COLOR_RGB2YCrCb)
+    luma = luma_chroma[..., 0].copy()
+    detail = luma - cv2.GaussianBlur(luma, (0, 0), sigmaX=1.0, borderType=cv2.BORDER_REFLECT)
+    luma_chroma[..., 0] = luma + sharpening * detail
+    half = cv2.resize(
+        luma_chroma[..., 1:], ((width + 1) // 2, (height + 1) // 2), interpolation=cv2.INTER_AREA
+    )
+    luma_chroma[..., 1:] = cv2.resize(half, (width, height), interpolation=cv2.INTER_LINEAR)
+    return _as_float(cv2.cvtColor(luma_chroma, cv2.COLOR_YCrCb2RGB))
 
 
 def noise_level(image: RgbImage) -> float:

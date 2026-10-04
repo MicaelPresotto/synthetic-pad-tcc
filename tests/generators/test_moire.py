@@ -66,6 +66,7 @@ MEANINGLESS_PARAMETERS = [
     ({"screen_min_pitch_px": 1.0, "screen_max_pitch_px": 1.5}, "either by the screen"),
     ({"screen_black_matrix": 1.5}, r"\[0, 1\]"),
     ({"camera_px_per_output_px": 0.0}, "must be positive"),
+    ({"camera_sharpening": -1.0}, "non-negative"),
 ]
 
 
@@ -308,6 +309,19 @@ class TestScreen:
     def test_turns_a_uniform_grey_into_colour_fringes(self) -> None:
         attack = self.photographed(self.GREY, 1.7)
         assert (attack[..., 0] - attack[..., 1]).std() > 5.0
+
+    def test_camera_sharpening_restores_detail(self, face_like_image: RgbImage) -> None:
+        def detail(sharpening: float) -> float:
+            config = dataclasses.replace(
+                NEUTRAL,
+                screen_min_pitch_px=0.8,
+                screen_max_pitch_px=0.8,
+                camera_sharpening=sharpening,
+            )
+            attack = MoireRecaptureGenerator(config).generate(face_like_image)
+            return float(np.abs(np.diff(attack.astype(np.float64), axis=1)).mean())
+
+        assert detail(2.0) > detail(0.0)
 
     def test_fringes_fade_as_the_screen_pixels_shrink_below_the_sensor_pixels(self) -> None:
         coarse = (self.photographed(self.GREY, 1.7)[..., 0]).std()

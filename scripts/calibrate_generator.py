@@ -33,6 +33,7 @@ FRINGE_SPAN = MoireConfig().moire_max_cycles_per_width / MoireConfig().moire_min
 SCREEN_SEARCH_SPACE = {
     "camera_psf_sigma_px": (0.3, 1.2),
     "camera_px_per_output_px": (1.0, 3.0),
+    "camera_sharpening": (0.0, 2.5),
     "screen_black_matrix": (0.0, 0.6),
     "screen_max_rotation_deg": (0.0, 10.0),
 }
