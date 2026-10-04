@@ -169,6 +169,10 @@ a camera instead of a recapture. `--noise-real-crops` adds the same noise stage 
 every real training crop too, bona fide and real attacks alike, so that noise no
 longer tells the classes apart.
 
+`--synthetic-per-face K` renders K synthetic attacks from each bona fide training crop
+instead of one. Copy k uses the generator seed plus k × 1000, so each copy draws its own
+artifacts, and K = 1 reproduces the single-copy runs exactly.
+
 `explain_judge.py` shows where a trained judge looks. It computes Grad-CAM of the
 attack logit over the test crops of both corpora, split by species, together with one
 synthetic replay rendered from each bona fide test crop. It writes `attention.json`
