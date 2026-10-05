@@ -37,6 +37,8 @@ INK = "#52514e"
 GRID = "#d9d8d4"
 SOURCE_LINE = r"{\footnotesize Source: prepared by the author (2026).}"
 NOT_RUN = "--"
+COLUMN_GAP_PT = 4
+CENTRED_X = ">{\\centering\\arraybackslash}X"
 
 type Report = dict[str, Any]
 type Runs = dict[tuple[str, str], dict[int, Path]]
@@ -91,10 +93,13 @@ def table(caption: str, label: str, columns: str, header: str, rows: Sequence[st
     body = "\n".join(rows)
     return (
         "\\begin{center}\n"
+        "\\begin{minipage}{\\textwidth}\n"
+        "\t\\centering\n"
         f"\t\\captionof{{table}}{{{caption}}}\n"
         f"\t\\label{{{label}}}\n"
         "\t\\footnotesize\n"
         "\t\\renewcommand{\\arraystretch}{1.2}\n"
+        f"\t\\setlength{{\\tabcolsep}}{{{COLUMN_GAP_PT}pt}}\n"
         f"\t\\begin{{tabularx}}{{\\textwidth}}{{{columns}}}\n"
         "\t\t\\toprule\n"
         f"\t\t{header} \\\\\n"
@@ -103,8 +108,13 @@ def table(caption: str, label: str, columns: str, header: str, rows: Sequence[st
         "\t\t\\bottomrule\n"
         "\t\\end{tabularx}\n\n"
         f"\t{SOURCE_LINE}\n"
+        "\\end{minipage}\n"
         "\\end{center}\n"
     )
+
+
+def direction_heading(source: str, target: str, columns: int) -> str:
+    return f"\t\t\\multicolumn{{{columns}}}{{l}}{{\\textit{{{arrow(source, target)}}}}} \\\\"
 
 
 def baseline_table(runs: Runs) -> str:
@@ -133,10 +143,10 @@ def baseline_table(runs: Runs) -> str:
 def main_table(runs: Runs) -> str:
     rows = []
     for source, target in DIRECTIONS:
-        for index, data in enumerate(CONFIGURATIONS):
+        rows.append(direction_heading(source, target, 6))
+        for data in CONFIGURATIONS:
             trained = runs[(source, data)]
             cells = [
-                arrow(source, target) if index == 0 else "",
                 data.capitalize(),
                 percent(measured(trained, hter_of("intra"))),
                 percent(measured(trained, hter_of("cross"))),
@@ -150,8 +160,8 @@ def main_table(runs: Runs) -> str:
         "the source dataset alone: intra-dataset HTER (\\%), and cross-dataset HTER (\\%) and AUC, "
         "mean and standard deviation over ten seeds.",
         "tab:main",
-        "p{2.3cm}lccccc",
-        "\\textbf{Source $\\rightarrow$ target} & \\textbf{Attacks} & \\textbf{HTER intra} & "
+        "Xccccc",
+        "\\textbf{Attacks} & \\textbf{HTER intra} & "
         "\\textbf{HTER cross} & \\textbf{AUC cross} & \\textbf{AUC replay} & \\textbf{AUC print}",
         rows,
     )
@@ -184,14 +194,15 @@ def metrics_table(runs: Runs) -> str:
     columns = ("apcer replay", "apcer print", "bpcer", "accuracy", "precision", "recall", "f1")
     rows = []
     for source, target in DIRECTIONS:
+        rows.append(direction_heading(source, target, len(columns) + 2))
         for data in CONFIGURATIONS:
-            for scenario, tested in (("intra", source), ("cross", target)):
+            for scenario in ("intra", "cross"):
                 trained = runs[(source, data)].values()
                 per_seed = [scenario_metrics(run, scenario) for run in trained]
                 means = [100 * np.mean([m[column] for m in per_seed]) for column in columns]
                 cells = [
-                    arrow(source, tested),
-                    data.capitalize(),
+                    data.capitalize() if scenario == "intra" else "",
+                    scenario.capitalize(),
                     *(f"{value:.1f}" for value in means),
                 ]
                 rows.append("\t\t" + " & ".join(cells) + " \\\\")
@@ -201,8 +212,8 @@ def metrics_table(runs: Runs) -> str:
         "PAD and general classification metrics (\\%) at the development threshold, with the "
         "attack as the positive class: mean over ten seeds.",
         "tab:metrics",
-        "Xlccccccc",
-        "\\textbf{Train $\\rightarrow$ test} & \\textbf{Attacks} & \\textbf{APCER replay} & "
+        "ll" + CENTRED_X * len(columns),
+        "\\textbf{Attacks} & \\textbf{Test} & \\textbf{APCER replay} & "
         "\\textbf{APCER print} & \\textbf{BPCER} & \\textbf{Accuracy} & \\textbf{Precision} & "
         "\\textbf{Recall} & \\textbf{F1}",
         rows,
@@ -225,7 +236,8 @@ def bona_fide_rule(run: Path, scenario: str) -> dict[str, float]:
 def threshold_table(runs: Runs) -> str:
     rows = []
     for source, target in DIRECTIONS:
-        for index, data in enumerate(CONFIGURATIONS):
+        rows.append(direction_heading(source, target, 8))
+        for data in CONFIGURATIONS:
             trained = list(runs[(source, data)].values())
             cross = [bona_fide_rule(run, "cross") for run in trained]
             values = [
@@ -237,11 +249,7 @@ def threshold_table(runs: Runs) -> str:
                     for column in ("hter", "apcer replay", "apcer print", "bpcer")
                 ),
             ]
-            cells = [
-                arrow(source, target) if index == 0 else "",
-                data.capitalize(),
-                *(f"{100 * value:.1f}" for value in values),
-            ]
+            cells = [data.capitalize(), *(f"{100 * value:.1f}" for value in values)]
             rows.append("\t\t" + " & ".join(cells) + " \\\\")
         if source != DIRECTIONS[-1][0]:
             rows.append("\t\t\\midrule")
@@ -252,12 +260,12 @@ def threshold_table(runs: Runs) -> str:
         f"{target} of the development bona fide crops, set without looking at any attack. "
         "Mean over ten seeds.",
         "tab:threshold",
-        "Xlccccccc",
-        "& & \\multicolumn{2}{c}{\\textbf{HTER intra}} & "
+        "l" + CENTRED_X * 7,
+        "& \\multicolumn{2}{c}{\\textbf{HTER intra}} & "
         "\\multicolumn{2}{c}{\\textbf{HTER cross}} & "
         f"\\multicolumn{{3}}{{c}}{{\\textbf{{Cross at BPCER {target}}}}} \\\\\n"
-        "\t\t\\cmidrule(lr){3-4} \\cmidrule(lr){5-6} \\cmidrule(lr){7-9}\n"
-        "\t\t\\textbf{Source $\\rightarrow$ target} & \\textbf{Attacks} & "
+        "\t\t\\cmidrule(lr){2-3} \\cmidrule(lr){4-5} \\cmidrule(lr){6-8}\n"
+        "\t\t\\textbf{Attacks} & "
         f"\\textbf{{EER}} & \\textbf{{BPCER {target}}} & "
         f"\\textbf{{EER}} & \\textbf{{BPCER {target}}} & "
         "\\textbf{APCER replay} & \\textbf{APCER print} & \\textbf{BPCER}",
@@ -274,7 +282,8 @@ def noise_table(noise_on: Runs, noise_off: Runs, noise_on_real_crops: Runs) -> s
     real training crop as well; the real configuration uses no generator when the stage is off."""
     rows = []
     for source, target in DIRECTIONS:
-        for index, data in enumerate(CONFIGURATIONS):
+        rows.append(direction_heading(source, target, 7))
+        for data in CONFIGURATIONS:
             key = (source, data)
             hters = [
                 percent_mean(runs[key], hter_of("cross")) if key in runs else NOT_RUN
@@ -282,7 +291,6 @@ def noise_table(noise_on: Runs, noise_off: Runs, noise_on_real_crops: Runs) -> s
             ]
             neutral = noise_on_real_crops[key].values()
             cells = [
-                arrow(source, target) if index == 0 else "",
                 data.capitalize(),
                 *hters,
                 *(
@@ -301,11 +309,11 @@ def noise_table(noise_on: Runs, noise_off: Runs, noise_on_real_crops: Runs) -> s
         "that the noise level no longer tells the classes apart; the last column uses the "
         f"BPCER {target} threshold of Table~\\ref{{tab:threshold}}. Mean over ten seeds.",
         "tab:noise",
-        "Xlcccccc",
-        "& & \\multicolumn{3}{c}{\\textbf{HTER cross}} & "
+        "l" + CENTRED_X * 6,
+        "& \\multicolumn{3}{c}{\\textbf{HTER cross}} & "
         "\\multicolumn{2}{c}{\\textbf{AUC replay cross}} & \\textbf{HTER cross} \\\\\n"
-        "\t\t\\cmidrule(lr){3-5} \\cmidrule(lr){6-7} \\cmidrule(lr){8-8}\n"
-        "\t\t\\textbf{Source $\\rightarrow$ target} & \\textbf{Attacks} & \\textbf{Noise on} & "
+        "\t\t\\cmidrule(lr){2-4} \\cmidrule(lr){5-6} \\cmidrule(lr){7-7}\n"
+        "\t\t\\textbf{Attacks} & \\textbf{Noise on} & "
         "\\textbf{Noise off} & \\textbf{On real crops} & \\textbf{Noise on} & "
         f"\\textbf{{On real crops}} & \\textbf{{BPCER {target}}}",
         rows,
@@ -420,11 +428,11 @@ def ratio_table(real: Runs, by_ratio: dict[float, Runs]) -> str:
     )
     rows = []
     for source, target in DIRECTIONS:
+        rows.append(direction_heading(source, target, len(by_ratio) + 3))
         for index, (data, (title, value_of)) in enumerate(
             (data, measure) for data in ("synthetic", "mixed") for measure in measures
         ):
             cells = [
-                arrow(source, target) if index == 0 else "",
                 data.capitalize() if index % len(measures) == 0 else "",
                 title,
                 value_of(real[(source, "real")]),
@@ -442,10 +450,10 @@ def ratio_table(real: Runs, by_ratio: dict[float, Runs]) -> str:
         "equally, so in the synthetic configuration the ratio changes how many distinct attacks "
         "the detector sees, not their total weight. Mean over ten seeds.",
         "tab:ratio",
-        f"Xll{'c' * (columns + 1)}",
-        f"& & & & \\multicolumn{{{columns}}}{{c}}{{\\textbf{{Synthetic per bona fide}}}} \\\\\n"
-        f"\t\t\\cmidrule(lr){{5-{columns + 4}}}\n"
-        "\t\t\\textbf{Source $\\rightarrow$ target} & \\textbf{Attacks} & \\textbf{Measure} & "
+        "ll" + CENTRED_X * (columns + 1),
+        f"& & & \\multicolumn{{{columns}}}{{c}}{{\\textbf{{Synthetic per bona fide}}}} \\\\\n"
+        f"\t\t\\cmidrule(lr){{4-{columns + 3}}}\n"
+        "\t\t\\textbf{Attacks} & \\textbf{Measure} & "
         f"\\textbf{{Real}} & {ratios}",
         rows,
     )
@@ -477,7 +485,7 @@ def calibration_table(first_generator: dict[str, Any]) -> str:
         "Image statistics of real and synthetic attacks relative to the bona fide crops of the "
         "same training partition; a value of 1 means no difference.",
         "tab:calibration",
-        "lXccccc",
+        "Xlccccc",
         "\\textbf{Dataset} & \\textbf{Crops} & \\textbf{Saturation} & \\textbf{Contrast} & "
         "\\textbf{Black level} & \\textbf{White level} & \\textbf{Sharpness}",
         rows,
