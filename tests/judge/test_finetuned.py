@@ -5,11 +5,11 @@ import pytest
 import torch
 
 from synthetic_pad.evaluation.metrics import auc
-from synthetic_pad.judge.resnet import (
-    ResNetLivenessDetector,
+from synthetic_pad.judge.finetuned import (
+    FineTunedDetector,
     TrainingConfig,
     build_model,
-    train_resnet,
+    train_detector,
 )
 
 TINY = TrainingConfig(pretrained=False, epochs=6, batch_size=8, learning_rate=1e-3)
@@ -24,9 +24,9 @@ def separable_set(count: int = 32, size: int = 32) -> tuple[np.ndarray, np.ndarr
 
 
 @pytest.fixture(scope="module")
-def trained() -> tuple[ResNetLivenessDetector, list[float]]:
+def trained() -> tuple[FineTunedDetector, list[float]]:
     images, is_attack = separable_set()
-    return train_resnet(images, is_attack, TINY, device="cpu")
+    return train_detector(images, is_attack, TINY, device="cpu")
 
 
 class TestTrainingConfig:
@@ -39,30 +39,30 @@ class TestTrainingConfig:
             TrainingConfig(epochs=0)
 
 
-class TestTrainResnet:
+class TestTrainDetector:
     def test_records_one_loss_per_epoch(
-        self, trained: tuple[ResNetLivenessDetector, list[float]]
+        self, trained: tuple[FineTunedDetector, list[float]]
     ) -> None:
         assert len(trained[1]) == TINY.epochs
 
     def test_learns_to_separate_an_easy_set(
-        self, trained: tuple[ResNetLivenessDetector, list[float]]
+        self, trained: tuple[FineTunedDetector, list[float]]
     ) -> None:
         images, is_attack = separable_set()
         scores = trained[0].score_batch(images)
         assert auc(scores[is_attack], scores[~is_attack]) > 0.9
 
 
-class TestResNetLivenessDetector:
+class TestFineTunedDetector:
     def test_scores_lie_in_the_unit_interval(
-        self, trained: tuple[ResNetLivenessDetector, list[float]]
+        self, trained: tuple[FineTunedDetector, list[float]]
     ) -> None:
         scores = trained[0].score_batch(separable_set()[0])
         assert scores.min() >= 0.0
         assert scores.max() <= 1.0
 
     def test_a_single_score_matches_the_batch(
-        self, trained: tuple[ResNetLivenessDetector, list[float]]
+        self, trained: tuple[FineTunedDetector, list[float]]
     ) -> None:
         images = separable_set()[0]
         assert trained[0].score(images[3]) == pytest.approx(
@@ -70,27 +70,25 @@ class TestResNetLivenessDetector:
         )
 
     def test_a_saved_detector_scores_the_same_after_loading(
-        self, trained: tuple[ResNetLivenessDetector, list[float]], tmp_path: Path
+        self, trained: tuple[FineTunedDetector, list[float]], tmp_path: Path
     ) -> None:
         images = separable_set()[0]
         trained[0].save(tmp_path / "judge.pt")
-        reloaded = ResNetLivenessDetector.load(tmp_path / "judge.pt", device="cpu")
+        reloaded = FineTunedDetector.load(tmp_path / "judge.pt", device="cpu")
         np.testing.assert_allclose(reloaded.score_batch(images), trained[0].score_batch(images))
 
 
 class TestGradCam:
     def test_gives_one_map_per_image_at_the_last_stage_resolution(
-        self, trained: tuple[ResNetLivenessDetector, list[float]]
+        self, trained: tuple[FineTunedDetector, list[float]]
     ) -> None:
         assert trained[0].grad_cam(separable_set(count=5, size=64)[0]).shape == (5, 2, 2)
 
-    def test_maps_are_never_negative(
-        self, trained: tuple[ResNetLivenessDetector, list[float]]
-    ) -> None:
+    def test_maps_are_never_negative(self, trained: tuple[FineTunedDetector, list[float]]) -> None:
         assert trained[0].grad_cam(separable_set(size=64)[0]).min() >= 0.0
 
     def test_leaves_the_scores_untouched(
-        self, trained: tuple[ResNetLivenessDetector, list[float]]
+        self, trained: tuple[FineTunedDetector, list[float]]
     ) -> None:
         images = separable_set()[0]
         before = trained[0].score_batch(images)
@@ -102,7 +100,7 @@ class TestGradCam:
     ) -> None:
         torch.manual_seed(0)
         model = build_model("resnet18", pretrained=False)
-        detector = ResNetLivenessDetector(model, "resnet18", device="cpu")
+        detector = FineTunedDetector(model, "resnet18", device="cpu")
         images = separable_set(count=4, size=96)[0]
         captured: list[torch.Tensor] = []
         hook = model.get_submodule("layer4").register_forward_hook(
@@ -117,3 +115,20 @@ class TestGradCam:
         np.testing.assert_allclose(
             detector.grad_cam(images), expected.numpy() / pooled_area, rtol=1e-4, atol=1e-8
         )
+
+
+@pytest.fixture(scope="module")
+def vision_transformer() -> FineTunedDetector:
+    return FineTunedDetector(build_model("vit_b_32", pretrained=False), "vit_b_32", "cpu")
+
+
+class TestVisionTransformer:
+    def test_scores_one_value_per_image(self, vision_transformer: FineTunedDetector) -> None:
+        images = separable_set(count=2, size=224)[0]
+        assert vision_transformer.score_batch(images).shape == (2,)
+
+    def test_has_no_convolutional_stage_for_grad_cam(
+        self, vision_transformer: FineTunedDetector
+    ) -> None:
+        with pytest.raises(ValueError, match="no convolutional stage"):
+            vision_transformer.grad_cam(separable_set(count=1, size=224)[0])

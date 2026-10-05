@@ -17,7 +17,7 @@ from synthetic_pad.frames import (
     select,
 )
 from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
-from synthetic_pad.judge.resnet import AttentionMaps, ResNetLivenessDetector
+from synthetic_pad.judge.finetuned import AttentionMaps, FineTunedDetector
 
 SYNTHETIC_REPLAY = "synthetic replay"
 OVERLAY_OPACITY = 0.45
@@ -104,7 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
     training = json.loads((args.run / "report.json").read_text())["training"]
-    detector = ResNetLivenessDetector.load(args.run / "judge.pt", args.device)
+    detector = FineTunedDetector.load(args.run / "judge.pt", args.device)
     generator = MoireRecaptureGenerator(MoireConfig(seed=training["config"]["seed"]))
 
     summary = {}

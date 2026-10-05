@@ -11,11 +11,11 @@ from synthetic_pad.calibration import read_fitted_config
 from synthetic_pad.evaluation.report import pad_report
 from synthetic_pad.frames import CORPORA, CropSample, load_partitions, read_crops, select
 from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
-from synthetic_pad.judge.resnet import (
+from synthetic_pad.judge.finetuned import (
     ARCHITECTURES,
     Scores,
     TrainingConfig,
-    train_resnet,
+    train_detector,
 )
 
 TRAINING_DATA = ("real", "synthetic", "mixed")
@@ -77,7 +77,7 @@ def report_on(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Train a ResNet judge on the crops of one corpus; test it on both."
+        description="Fine-tune a judge on the crops of one corpus; test it on both."
     )
     parser.add_argument("--train-corpus", choices=CORPORA, required=True)
     parser.add_argument(
@@ -151,7 +151,7 @@ def main() -> None:
         args.seed,
     )
 
-    detector, losses = train_resnet(images, is_attack, config, args.device)
+    detector, losses = train_detector(images, is_attack, config, args.device)
     detector.save(args.output / "judge.pt")
 
     scored: dict[str, tuple[list[CropSample], Scores]] = {}

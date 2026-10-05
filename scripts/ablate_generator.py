@@ -11,7 +11,7 @@ import torch
 from synthetic_pad.corpora import BONA_FIDE
 from synthetic_pad.frames import load_partitions, read_crops, select
 from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
-from synthetic_pad.judge.resnet import ResNetLivenessDetector
+from synthetic_pad.judge.finetuned import FineTunedDetector
 
 STAGE_OFF = {
     "geometry": {"tilt_x": 0.0, "tilt_y": 0.0, "rotation_deg": 0.0},
@@ -60,7 +60,7 @@ def main() -> None:
     training = json.loads((args.run / "report.json").read_text())["training"]
     recorded = training.get("generator", {})
     settings = {name: value for name, value in recorded.items() if name != "generator"}
-    detector = ResNetLivenessDetector.load(args.run / "judge.pt", args.device)
+    detector = FineTunedDetector.load(args.run / "judge.pt", args.device)
     tested = select(load_partitions(args.frames)[training["corpus"]], "test")
     bona_fide = read_crops([sample for sample in tested if sample.species == BONA_FIDE])
 
