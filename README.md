@@ -214,6 +214,13 @@ uv run python scripts/measure_noise.py
 `--synthetic-per-face K` renders K synthetic attacks from each bona fide training crop
 instead of one. Copy k uses the generator seed plus k × 1000, so each copy draws its own
 artifacts, and K = 1 reproduces the single-copy runs exactly.
+`--spectral-band B` swaps the moiré generator for a data-driven one
+(`generators/spectral.py`): each synthetic attack is a bona fide crop whose Fourier amplitude,
+up to B cycles per pixel in both directions and in each colour channel, is taken from a real
+training replay of the same corpus, drawn by the content of the crop, while the crop's phase,
+which holds the face, is kept. This is the Fourier domain adaptation of Yang and Soatto (2020)
+used as a generator. It reads real replays of the source corpus, so its synthetic attacks are
+not free of real attack data, though nothing of the target corpus reaches them.
 `--synthetic-fraction f` goes the other way: synthetic attacks are rendered from a random
 f of the bona fide training crops, drawn with the training seed, so the judge sees fewer
 synthetic attacks than bona fide. f = 1 reproduces the single-copy runs exactly.

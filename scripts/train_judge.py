@@ -1,6 +1,7 @@
 import argparse
 import json
 from collections import defaultdict
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -8,9 +9,12 @@ import numpy as np
 import torch
 
 from synthetic_pad.calibration import read_fitted_config
+from synthetic_pad.corpora import REPLAY
+from synthetic_pad.domain import AttackGenerator, RgbImage
 from synthetic_pad.evaluation.report import pad_report
 from synthetic_pad.frames import CORPORA, CropSample, load_partitions, read_crops, select
 from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
+from synthetic_pad.generators.spectral import SpectralConfig, SpectralTransferGenerator
 from synthetic_pad.judge.finetuned import (
     ARCHITECTURES,
     Scores,
@@ -34,8 +38,8 @@ def fraction_of(count: int, fraction: float, seed: int) -> np.ndarray:
 def training_set(
     samples: list[CropSample],
     data: str,
-    generators: list[MoireRecaptureGenerator],
-    noise_real_crops: bool,
+    generators: Sequence[AttackGenerator],
+    real_crop_noise: Callable[[RgbImage], RgbImage] | None,
     synthetic_fraction: float,
     seed: int,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -49,9 +53,8 @@ def training_set(
         synthetic = [
             np.stack([generator.generate(image) for image in sources]) for generator in generators
         ]
-    if noise_real_crops:
-        noise = generators[0].add_sensor_noise
-        real = [np.stack([noise(image) for image in group]) for group in real]
+    if real_crop_noise is not None:
+        real = [np.stack([real_crop_noise(image) for image in group]) for group in real]
     images = np.concatenate([*real, *synthetic])
     is_attack = np.arange(len(images)) >= len(bona_fide)
     return images, is_attack
@@ -92,6 +95,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="fitted moire settings from calibrate_generator.py --fit; defaults otherwise",
     )
     parser.add_argument(
+        "--spectral-band",
+        type=float,
+        help="render the synthetic attacks by carrying the low-frequency amplitude spectrum of "
+        "the corpus's real training replays, up to this many cycles per pixel, onto the bona "
+        "fide crops, instead of with the moire generator",
+    )
+    parser.add_argument(
         "--noise-real-crops",
         action="store_true",
         help="add the generator's sensor noise to every real training crop as well, so that "
@@ -128,6 +138,8 @@ def main() -> None:
         parser.error(f"--synthetic-per-face must be at least 1, got {args.synthetic_per_face}")
     if not 0 < args.synthetic_fraction <= 1:
         parser.error(f"--synthetic-fraction must be in (0, 1], got {args.synthetic_fraction}")
+    if args.spectral_band is not None and (args.generator_config or args.noise_real_crops):
+        parser.error("--spectral-band replaces the moire generator and its sensor noise")
     config = TrainingConfig(
         architecture=args.architecture,
         pretrained=not args.no_pretrained,
@@ -137,16 +149,27 @@ def main() -> None:
     partitions = load_partitions(args.frames)
     source = partitions[args.train_corpus]
     target_corpus = next(corpus for corpus in CORPORA if corpus != args.train_corpus)
-    fitted = read_fitted_config(args.generator_config) if args.generator_config else MoireConfig()
-    generators = [
-        MoireRecaptureGenerator(replace(fitted, seed=args.seed + copy * COPY_SEED_STRIDE))
-        for copy in range(args.synthetic_per_face)
-    ]
+    copy_seeds = [args.seed + copy * COPY_SEED_STRIDE for copy in range(args.synthetic_per_face)]
+    generators: list[AttackGenerator]
+    real_crop_noise = None
+    if args.spectral_band is None:
+        fitted = (
+            read_fitted_config(args.generator_config) if args.generator_config else MoireConfig()
+        )
+        moire = [MoireRecaptureGenerator(replace(fitted, seed=seed)) for seed in copy_seeds]
+        generators = list(moire)
+        real_crop_noise = moire[0].add_sensor_noise if args.noise_real_crops else None
+    else:
+        replays = read_crops([s for s in select(source, "train") if s.species == REPLAY])
+        generators = [
+            SpectralTransferGenerator(replays, SpectralConfig(args.spectral_band, seed))
+            for seed in copy_seeds
+        ]
     images, is_attack = training_set(
         select(source, "train"),
         args.data,
         generators,
-        args.noise_real_crops,
+        real_crop_noise,
         args.synthetic_fraction,
         args.seed,
     )
