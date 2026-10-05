@@ -1,4 +1,3 @@
-import hashlib
 import math
 import warnings
 from collections.abc import Mapping
@@ -8,7 +7,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-from synthetic_pad.domain.image import LUMA_WEIGHTS, RgbImage, ensure_rgb_uint8
+from synthetic_pad.domain.image import LUMA_WEIGHTS, RgbImage, content_digest, ensure_rgb_uint8
 from synthetic_pad.domain.ports import AttackGenerator
 from synthetic_pad.domain.validation import (
     require_non_negative,
@@ -126,7 +125,7 @@ class MoireRecaptureGenerator(AttackGenerator):
 
     def generate(self, image: RgbImage) -> RgbImage:
         ensure_rgb_uint8(image)
-        rng = np.random.default_rng([self._config.seed, _content_digest(image)])
+        rng = np.random.default_rng([self._config.seed, content_digest(image)])
         canvas: FloatImage = image.astype(np.float64) / 255.0
         canvas = self._apply_geometry(canvas, rng)
         canvas = self._apply_tone(canvas, rng)
@@ -140,7 +139,7 @@ class MoireRecaptureGenerator(AttackGenerator):
     def add_sensor_noise(self, image: RgbImage) -> RgbImage:
         """The noise stage alone, so that real crops can carry the noise the attacks carry."""
         ensure_rgb_uint8(image)
-        rng = np.random.default_rng([self._config.seed, _content_digest(image)])
+        rng = np.random.default_rng([self._config.seed, content_digest(image)])
         canvas: FloatImage = image.astype(np.float64) / 255.0
         return _quantise_to_uint8(self._apply_noise(canvas, rng, image))
 
@@ -444,8 +443,3 @@ def _screen_blend(base: FloatImage, layer: FloatImage) -> FloatImage:
 
 def _quantise_to_uint8(canvas: FloatImage) -> RgbImage:
     return np.rint(np.clip(canvas * 255.0, 0.0, 255.0)).astype(np.uint8)
-
-
-def _content_digest(image: RgbImage) -> int:
-    digest = hashlib.blake2b(image.tobytes(), digest_size=8).digest()
-    return int.from_bytes(digest, "big")

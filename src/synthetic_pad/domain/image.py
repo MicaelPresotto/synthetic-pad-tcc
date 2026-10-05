@@ -1,5 +1,6 @@
 """The one image format shared across every layer: RGB, uint8, (H, W, 3)."""
 
+import hashlib
 from typing import Any
 
 import numpy as np
@@ -16,3 +17,10 @@ def ensure_rgb_uint8(image: np.ndarray[Any, Any]) -> RgbImage:
     if image.dtype != np.uint8:
         raise ValueError(f"expected dtype uint8, got {image.dtype}")
     return image
+
+
+def content_digest(image: RgbImage) -> int:
+    """A 64-bit hash of the pixels, so that a generator draws the same artifacts for the same
+    image however often, and in whatever order, it is asked."""
+    digest = hashlib.blake2b(image.tobytes(), digest_size=8).digest()
+    return int.from_bytes(digest, "big")
