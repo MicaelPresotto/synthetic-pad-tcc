@@ -149,12 +149,14 @@ uv run python scripts/calibrate_generator.py --fit replay-mobile --trials 250 --
 `--screen` fits the screen and camera stage instead, on top of `--generator-config`, whose
 other settings it keeps, so that the two moiré models differ in the moiré alone.
 The `moire-screen-fitted-to-*` configs in `experiments/` are those fits, on top of the
-`-matched-noise` configs; the sinusoidal fringes stay closer to the MSU-MFSD replays
-(distance 0.054 against 0.128) and the screen to the Replay-Mobile ones (0.227 against
-0.281).
+`-matched-noise` configs, each the best of three searches (`--seed` 0, 1 and 2): seed 1
+for MSU-MFSD and seed 0 for Replay-Mobile. The searches disagree widely on the screen pitch,
+so the stage is less well identified by these statistics than the sinusoidal fringes,
+which stay closer to the MSU-MFSD replays (distance 0.052 against 0.089), while the screen
+is closer to the Replay-Mobile ones (0.227 against 0.281).
 
 ```bash
-uv run python scripts/calibrate_generator.py --fit msu --screen --trials 150 --generator-config experiments/moire-fitted-to-msu-matched-noise.json --output experiments/moire-screen-fitted-to-msu.json
+uv run python scripts/calibrate_generator.py --fit msu --screen --trials 150 --seed 1 --generator-config experiments/moire-fitted-to-msu-matched-noise.json --output experiments/moire-screen-fitted-to-msu.json
 ```
 
 Once the parameters are settled, one attack is rendered for every bona fide image in a
