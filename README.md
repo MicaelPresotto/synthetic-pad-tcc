@@ -256,7 +256,9 @@ It reads the ten-seed runs of `results/clean`, the reruns with the noise stage o
 (`results/no-noise`, trained with the `-without-noise` configs in `experiments/`) and
 with noise on every real crop (`results/noise-real-crops`), the same runs at other
 synthetic-per-bona-fide ratios (`results/fraction-0.1`, `-0.25`, `-0.5`, `results/copies-3`,
-`-5`; each folder's ratio is read from its reports), the first-generator runs of
+`-5`; each folder's ratio is read from its reports), the matched-noise and screen runs
+(`results/matched-noise-fraction-1`, `results/matched-noise-copies-3`,
+`results/screen-best-fraction-1`, `results/screen-best-copies-3`), the first-generator runs of
 `results/judges` and the calibration reports, and writes the `.tex` tables and `.pdf`
 figures into `monographs/`. `ablate_generator.py` writes the `ablation.json` behind the
 stage tables, run on every synthetic judge of `results/clean` and
