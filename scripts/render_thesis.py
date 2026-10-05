@@ -366,6 +366,15 @@ def median_and_range(values: Sequence[float]) -> str:
     return f"{np.median(values):.2f} ({score_range(values)})"
 
 
+def ablation_cell(runs: Runs, corpus: str, variant: str) -> str:
+    return median_and_range(
+        [
+            json.loads((run / "ablation.json").read_text())["median_score"][variant]
+            for run in runs[(corpus, "synthetic")].values()
+        ]
+    )
+
+
 def noise_ablation_table(noise_on: Runs, noise_on_real_crops: Runs) -> str:
     groups = [(runs, corpus) for runs in (noise_on, noise_on_real_crops) for corpus in CORPUS_NAMES]
     lines = (
@@ -376,15 +385,7 @@ def noise_ablation_table(noise_on: Runs, noise_on_real_crops: Runs) -> str:
     )
     rows = []
     for title, variant in lines:
-        cells = [
-            median_and_range(
-                [
-                    json.loads((run / "ablation.json").read_text())["median_score"][variant]
-                    for run in runs[(corpus, "synthetic")].values()
-                ]
-            )
-            for runs, corpus in groups
-        ]
+        cells = [ablation_cell(runs, corpus, variant) for runs, corpus in groups]
         rows.append("\t\t" + " & ".join([title, *cells]) + " \\\\")
     return table(
         "Median score of the calibrated synthetic detectors on attacks rendered from the bona fide "
@@ -394,6 +395,75 @@ def noise_ablation_table(noise_on: Runs, noise_on_real_crops: Runs) -> str:
         "Xcccc",
         "& \\multicolumn{2}{c}{\\textbf{Noise on synthetic attacks}} & "
         "\\multicolumn{2}{c}{\\textbf{Noise on real crops too}} \\\\\n"
+        "\t\t\\cmidrule(lr){2-3} \\cmidrule(lr){4-5}\n"
+        "\t\t\\textbf{Attack rendered with} & \\textbf{MSU-MFSD} & \\textbf{Replay-Mobile} & "
+        "\\textbf{MSU-MFSD} & \\textbf{Replay-Mobile}",
+        rows,
+    )
+
+
+def generators_table(real: Runs, variants: Sequence[tuple[str, Runs]]) -> str:
+    def errors(runs: dict[int, Path]) -> list[str]:
+        replay_auc = measured(runs, cross_auc("replay")).mean()
+        return [percent_mean(runs, hter_of("cross")), f"{replay_auc:.3f}"]
+
+    rows = []
+    for source, target in DIRECTIONS:
+        rows.append(direction_heading(source, target, 5))
+        hter, replay_auc = errors(real[(source, "real")])
+        reference = f"\\multicolumn{{4}}{{c}}{{HTER {hter}\\%, replay AUC {replay_auc}}}"
+        rows.append(f"\t\tReal attacks only & {reference} \\\\")
+        for title, runs in variants:
+            cells = [errors(runs[(source, data)]) for data in ("synthetic", "mixed")]
+            rows.append("\t\t" + " & ".join([title, *cells[0], *cells[1]]) + " \\\\")
+        if source != DIRECTIONS[-1][0]:
+            rows.append("\t\t\\midrule")
+    return table(
+        "Cross-dataset HTER (\\%) and replay AUC for each version of the generator, with no "
+        "noise on the real training crops: the sinusoidal fringes of Table~\\ref{tab:main} with "
+        "the fixed noise level of the calibration or with the noise matched to the real replays, "
+        "and the "
+        "simulated screen with matched noise, rendering one or three synthetic attacks per bona "
+        "fide crop. Mean over ten seeds.",
+        "tab:generators",
+        "l" + CENTRED_X * 4,
+        "& \\multicolumn{2}{c}{\\textbf{Synthetic}} & \\multicolumn{2}{c}{\\textbf{Mixed}} \\\\\n"
+        "\t\t\\cmidrule(lr){2-3} \\cmidrule(lr){4-5}\n"
+        "\t\t\\textbf{Generator} & \\textbf{HTER} & \\textbf{AUC replay} & \\textbf{HTER} & "
+        "\\textbf{AUC replay}",
+        rows,
+    )
+
+
+def generators_ablation_table(sinusoidal: Runs, screen: Runs) -> str:
+    groups = [
+        (runs, corpus, moire)
+        for runs, moire in ((sinusoidal, "moire"), (screen, "screen"))
+        for corpus in CORPUS_NAMES
+    ]
+    lines = (
+        ("Every stage", "every stage"),
+        ("Every stage but noise", "every stage but noise"),
+        ("Noise alone", "noise alone"),
+        ("Every stage but its moiré", "every stage but {moire}"),
+        ("Its moiré alone", "{moire} alone"),
+    )
+    rows = []
+    for title, variant in lines:
+        cells = [
+            ablation_cell(runs, corpus, variant.format(moire=moire))
+            for runs, corpus, moire in groups
+        ]
+        rows.append("\t\t" + " & ".join([title, *cells]) + " \\\\")
+    return table(
+        "Median score of the synthetic detectors trained with matched noise on attacks rendered "
+        "from the bona fide test crops of their own dataset, with one stage switched on or off; "
+        "the moiré is the sinusoidal fringes or the simulated screen. Median over ten seeds, with "
+        "the range across seeds.",
+        "tab:ablation-generators",
+        "l" + CENTRED_X * 4,
+        "& \\multicolumn{2}{c}{\\textbf{Sinusoidal fringes}} & "
+        "\\multicolumn{2}{c}{\\textbf{Simulated screen}} \\\\\n"
         "\t\t\\cmidrule(lr){2-3} \\cmidrule(lr){4-5}\n"
         "\t\t\\textbf{Attack rendered with} & \\textbf{MSU-MFSD} & \\textbf{Replay-Mobile} & "
         "\\textbf{MSU-MFSD} & \\textbf{Replay-Mobile}",
@@ -650,6 +720,22 @@ def build_parser() -> argparse.ArgumentParser:
         ],
         help="runs with noise on every real crop, one folder per synthetic-per-bona-fide ratio",
     )
+    parser.add_argument(
+        "--matched-noise",
+        type=Path,
+        nargs=2,
+        metavar=("ONE", "THREE"),
+        default=[Path("results/matched-noise-fraction-1"), Path("results/matched-noise-copies-3")],
+        help="sinusoidal generator with matched noise, one and three synthetic attacks per crop",
+    )
+    parser.add_argument(
+        "--screen",
+        type=Path,
+        nargs=2,
+        metavar=("ONE", "THREE"),
+        default=[Path("results/screen-best-fraction-1"), Path("results/screen-best-copies-3")],
+        help="simulated screen with matched noise, one and three synthetic attacks per crop",
+    )
     parser.add_argument("--first-generator-runs", type=Path, default=Path("results/judges"))
     parser.add_argument(
         "--first-generator-calibration",
@@ -675,6 +761,8 @@ def main() -> None:
     noise_off = {**find_runs(args.noise_off), **real_only}
     noise_on_real_crops = find_runs(args.noise_on_real_crops)
     by_ratio = runs_by_ratio(args.synthetic_ratios)
+    matched_one, matched_three = (find_runs(path) for path in args.matched_noise)
+    screen_one, screen_three = (find_runs(path) for path in args.screen)
     first_generator = json.loads(args.first_generator_calibration.read_text())
     calibrated = {
         corpus: json.loads(path.read_text())
@@ -690,6 +778,17 @@ def main() -> None:
         "tab-ablation.tex": ablation_table(find_runs(args.first_generator_runs)),
         "tab-ablation-noise.tex": noise_ablation_table(clean, noise_on_real_crops),
         "tab-ratio.tex": ratio_table(noise_on_real_crops, by_ratio),
+        "tab-generators.tex": generators_table(
+            clean,
+            (
+                ("Sinusoidal, fixed noise", clean),
+                ("Sinusoidal, matched noise", matched_one),
+                ("\\quad three per crop", matched_three),
+                ("Screen, matched noise", screen_one),
+                ("\\quad three per crop", screen_three),
+            ),
+        ),
+        "tab-ablation-generators.tex": generators_ablation_table(matched_one, screen_one),
         "tab-calibration.tex": calibration_table(first_generator),
     }
     for name, content in outputs.items():
@@ -708,6 +807,13 @@ def main() -> None:
             print_paired_differences(
                 f"{ratio:g} synthetic per bona fide", {**runs, **real_on_real_crops}
             )
+    for title, runs in (
+        ("sinusoidal, matched noise", matched_one),
+        ("sinusoidal, matched noise, three per crop", matched_three),
+        ("screen, matched noise", screen_one),
+        ("screen, matched noise, three per crop", screen_three),
+    ):
+        print_paired_differences(title, {**runs, **real_only})
     print_spectrum_fit(calibrated)
 
 
