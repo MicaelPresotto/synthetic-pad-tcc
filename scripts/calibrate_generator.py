@@ -1,7 +1,8 @@
 import argparse
 import json
 import math
-from dataclasses import asdict
+from collections.abc import Callable
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,17 @@ SEARCH_SPACE = {
 }
 LOWEST_FRINGE_RANGE = (2.0, 16.0)
 FRINGE_SPAN = MoireConfig().moire_max_cycles_per_width / MoireConfig().moire_min_cycles_per_width
+SCREEN_SEARCH_SPACE = {
+    "camera_psf_sigma_px": (0.3, 1.2),
+    "camera_px_per_output_px": (1.0, 3.0),
+    "camera_sharpening": (0.0, 2.5),
+    "screen_black_matrix": (0.0, 0.6),
+    "screen_max_rotation_deg": (0.0, 10.0),
+}
+FINEST_PITCH_RANGE = (0.7, 2.5)
+PITCH_SPAN = 1.5
+
+type Drawer = Callable[[np.random.Generator, MoireConfig], MoireConfig]
 
 
 def sample_by_species(
@@ -47,18 +59,39 @@ def render(config: MoireConfig, bona_fide: np.ndarray) -> np.ndarray:
     return np.stack([generator.generate(image) for image in bona_fide])
 
 
-def draw_candidate(rng: np.random.Generator) -> MoireConfig:
+def draw_candidate(rng: np.random.Generator, base: MoireConfig) -> MoireConfig:
     drawn = {name: float(rng.uniform(low, high)) for name, (low, high) in SEARCH_SPACE.items()}
     lowest = math.exp(rng.uniform(*np.log(LOWEST_FRINGE_RANGE)))
     highest = lowest * FRINGE_SPAN
-    fields: dict[str, Any] = asdict(MoireConfig())
+    fields: dict[str, Any] = asdict(base)
     fields |= drawn
     fields |= {"moire_min_cycles_per_width": lowest, "moire_max_cycles_per_width": highest}
     return MoireConfig(**fields)
 
 
+def draw_screen_candidate(rng: np.random.Generator, base: MoireConfig) -> MoireConfig:
+    """The screen and camera settings, on top of a configuration whose other stages are kept."""
+    drawn: dict[str, Any] = {
+        name: float(rng.uniform(low, high)) for name, (low, high) in SCREEN_SEARCH_SPACE.items()
+    }
+    finest = math.exp(rng.uniform(*np.log(FINEST_PITCH_RANGE)))
+    return replace(
+        base,
+        moire_amplitude=0.0,
+        screen_min_pitch_px=finest,
+        screen_max_pitch_px=finest * PITCH_SPAN,
+        **drawn,
+    )
+
+
 def fit(
-    corpus: str, groups: dict[str, np.ndarray], trials: int, rng: np.random.Generator
+    corpus: str,
+    groups: dict[str, np.ndarray],
+    trials: int,
+    rng: np.random.Generator,
+    base: MoireConfig,
+    draw: Drawer,
+    base_competes: bool,
 ) -> dict[str, object]:
     """Random search for the settings whose attacks look most like the corpus's replays.
 
@@ -67,12 +100,10 @@ def fit(
     shortcut.
     """
     target = appearance(groups[REPLAY])
-    default_distance = appearance_distance(
-        appearance(render(MoireConfig(), groups[BONA_FIDE])), target
-    )
-    best, best_distance = MoireConfig(), default_distance
+    default_distance = appearance_distance(appearance(render(base, groups[BONA_FIDE])), target)
+    best, best_distance = (base, default_distance) if base_competes else (base, math.inf)
     for trial in range(trials):
-        candidate = draw_candidate(rng)
+        candidate = draw(rng, base)
         distance = appearance_distance(appearance(render(candidate, groups[BONA_FIDE])), target)
         if distance < best_distance:
             best, best_distance = candidate, distance
@@ -121,6 +152,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--generator-config", type=Path, help="fitted settings to report on")
     parser.add_argument("--fit", choices=CORPORA, help="search settings for this corpus alone")
     parser.add_argument("--trials", type=int, default=60)
+    parser.add_argument(
+        "--screen",
+        action="store_true",
+        help="with --fit, search the screen and camera settings in place of the sinusoidal "
+        "fringes, keeping every other setting of --generator-config",
+    )
     return parser
 
 
@@ -130,18 +167,21 @@ def main() -> None:
     partitions = load_partitions(args.frames)
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
+    base = read_fitted_config(args.generator_config) if args.generator_config else MoireConfig()
     if args.fit:
         groups = sample_by_species(select(partitions[args.fit], "train"), args.crops, rng)
-        fitted = fit(args.fit, groups, args.trials, rng)
+        draw = draw_screen_candidate if args.screen else draw_candidate
+        fitted = fit(args.fit, groups, args.trials, rng, base, draw, base_competes=not args.screen)
+        if args.screen:
+            fitted["fitted_to"] = f"{fitted['fitted_to']}, screen and camera stage"
         args.output.write_text(json.dumps(fitted, indent=2) + "\n")
         print(f"distance {fitted['distance']:.4f}, defaults {fitted['default_distance']:.4f}")
         return
 
-    config = read_fitted_config(args.generator_config) if args.generator_config else MoireConfig()
-    summary: dict[str, object] = {"generator": asdict(config), "bands": CHROMA_BANDS}
+    summary: dict[str, object] = {"generator": asdict(base), "bands": CHROMA_BANDS}
     for corpus in CORPORA:
         groups = sample_by_species(select(partitions[corpus], "train"), args.crops, rng)
-        summary[corpus] = report(corpus, groups, config)
+        summary[corpus] = report(corpus, groups, base)
     args.output.write_text(json.dumps(summary, indent=2) + "\n")
 
 

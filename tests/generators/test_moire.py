@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from synthetic_pad.domain import RgbImage
-from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
+from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator, noise_level
 
 NEUTRAL = MoireConfig(
     tilt_x=0.0,
@@ -35,6 +35,7 @@ EVERY_STAGE = [
     {"blur_sigma_px": 1.5},
     {"moire_amplitude": 0.15},
     {"noise_sigma_levels": 4.0},
+    {"screen_min_pitch_px": 1.2, "screen_max_pitch_px": 1.6},
 ]
 
 MEANINGLESS_PARAMETERS = [
@@ -49,10 +50,29 @@ MEANINGLESS_PARAMETERS = [
     ({"saturation": -0.5}, "non-negative"),
     ({"moire_amplitude": -0.1}, "non-negative"),
     ({"noise_sigma_levels": -1.0}, "non-negative"),
+    ({"noise_to_bona_fide": -1.0}, "non-negative"),
+    (
+        {"noise_sigma_levels": 2.0, "noise_to_bona_fide": 1.2},
+        "either noise_sigma_levels or noise_to_bona_fide",
+    ),
     ({"glare_intensity": 2.0}, r"\[0, 1\]"),
     ({"glare_extent": 0.0}, "must be positive"),
     ({"moire_cross_weight": -0.5}, "non-negative"),
+    (
+        {"moire_amplitude": 0.0, "screen_min_pitch_px": 2.0, "screen_max_pitch_px": 1.0},
+        "screen_min_pitch_px <= screen_max_pitch_px",
+    ),
+    ({"moire_amplitude": 0.0, "screen_max_pitch_px": 1.0}, "screen_min_pitch_px > 0"),
+    ({"screen_min_pitch_px": 1.0, "screen_max_pitch_px": 1.5}, "either by the screen"),
+    ({"screen_black_matrix": 1.5}, r"\[0, 1\]"),
+    ({"camera_px_per_output_px": 0.0}, "must be positive"),
+    ({"camera_sharpening": -1.0}, "non-negative"),
 ]
+
+
+def grey_with_noise(sigma_levels: float, size: int = 224) -> RgbImage:
+    noise = np.random.default_rng(20261004).normal(0.0, sigma_levels, (size, size, 1))
+    return np.clip(np.rint(128.0 + noise), 0, 255).repeat(3, axis=2).astype(np.uint8)
 
 
 def at_fixed_frequency(config: MoireConfig, cycles_per_width: float) -> MoireConfig:
@@ -129,6 +149,13 @@ class TestOutputContract:
 class TestArtifacts:
     def test_the_neutral_config_is_the_identity(self, face_like_image: RgbImage) -> None:
         attack = MoireRecaptureGenerator(NEUTRAL).generate(face_like_image)
+        np.testing.assert_array_equal(attack, face_like_image)
+
+    def test_the_neutral_config_stays_the_identity_with_variation(
+        self, face_like_image: RgbImage
+    ) -> None:
+        config = dataclasses.replace(NEUTRAL, variation=0.25)
+        attack = MoireRecaptureGenerator(config).generate(face_like_image)
         np.testing.assert_array_equal(attack, face_like_image)
 
     @pytest.mark.parametrize("override", EVERY_STAGE)
@@ -264,6 +291,104 @@ class TestNoise:
         assert not np.all(attack == 128)
         assert np.array_equal(attack[..., 0], attack[..., 1])
         assert np.array_equal(attack[..., 1], attack[..., 2])
+
+
+class TestScreen:
+    GREY = np.full((224, 224, 3), 150, dtype=np.uint8)
+
+    def photographed(self, image: RgbImage, pitch: float) -> np.ndarray:
+        config = dataclasses.replace(NEUTRAL, screen_min_pitch_px=pitch, screen_max_pitch_px=pitch)
+        return MoireRecaptureGenerator(config).generate(image).astype(np.float64)
+
+    def test_keeps_the_mean_colour(self) -> None:
+        tinted = np.zeros_like(self.GREY)
+        tinted[...] = (180, 90, 40)
+        means = self.photographed(tinted, 1.2).reshape(-1, 3).mean(axis=0)
+        assert np.allclose(means, (180, 90, 40), atol=3.0)
+
+    def test_turns_a_uniform_grey_into_colour_fringes(self) -> None:
+        attack = self.photographed(self.GREY, 1.7)
+        assert (attack[..., 0] - attack[..., 1]).std() > 5.0
+
+    def test_camera_sharpening_restores_detail(self, face_like_image: RgbImage) -> None:
+        def detail(sharpening: float) -> float:
+            config = dataclasses.replace(
+                NEUTRAL,
+                screen_min_pitch_px=0.8,
+                screen_max_pitch_px=0.8,
+                camera_sharpening=sharpening,
+            )
+            attack = MoireRecaptureGenerator(config).generate(face_like_image)
+            return float(np.abs(np.diff(attack.astype(np.float64), axis=1)).mean())
+
+        assert detail(2.0) > detail(0.0)
+
+    def test_fringes_fade_as_the_screen_pixels_shrink_below_the_sensor_pixels(self) -> None:
+        coarse = (self.photographed(self.GREY, 1.7)[..., 0]).std()
+        fine = (self.photographed(self.GREY, 0.8)[..., 0]).std()
+        assert fine < coarse / 3.0
+
+
+class TestNoiseMatchedToBonaFide:
+    def matched(self, ratio: float) -> MoireRecaptureGenerator:
+        return MoireRecaptureGenerator(dataclasses.replace(NEUTRAL, noise_to_bona_fide=ratio))
+
+    def test_brings_the_noise_of_the_attack_to_the_ratio_of_the_bona_fide(self) -> None:
+        bona_fide = grey_with_noise(3.0)
+        attack = self.matched(1.5).generate(bona_fide)
+        assert noise_level(attack) == pytest.approx(1.5 * noise_level(bona_fide), rel=0.1)
+
+    def test_adds_nothing_when_the_attack_is_already_noisy_enough(self) -> None:
+        bona_fide = grey_with_noise(3.0)
+        assert np.array_equal(self.matched(0.5).generate(bona_fide), bona_fide)
+
+    def test_applies_to_real_crops_through_the_sensor_noise_alone(self) -> None:
+        crop = grey_with_noise(3.0)
+        noisy = self.matched(2.0).add_sensor_noise(crop)
+        assert noise_level(noisy) == pytest.approx(2.0 * noise_level(crop), rel=0.1)
+
+
+class TestNoiseLevel:
+    def test_a_flat_image_has_no_noise(self) -> None:
+        assert noise_level(np.full((32, 32, 3), 90, dtype=np.uint8)) == 0.0
+
+    def test_ignores_a_linear_ramp(self) -> None:
+        ramp = np.repeat(np.linspace(20.0, 220.0, 224)[None, :, None], 224, axis=0)
+        image = np.repeat(ramp, 3, axis=2).astype(np.uint8)
+        assert noise_level(image) < 0.5
+
+    def test_recovers_the_deviation_of_added_grey_noise(self) -> None:
+        assert noise_level(grey_with_noise(5.0)) == pytest.approx(5.0, rel=0.05)
+
+
+class TestSensorNoise:
+    GREY = np.full((64, 64, 3), 128, dtype=np.uint8)
+
+    def noisy(self, sigma_levels: float, image: RgbImage | None = None) -> RgbImage:
+        config = dataclasses.replace(MoireConfig(), noise_sigma_levels=sigma_levels)
+        return MoireRecaptureGenerator(config).add_sensor_noise(
+            self.GREY if image is None else image
+        )
+
+    def test_spreads_the_levels_by_the_configured_sigma(self) -> None:
+        deviation = self.noisy(4.0).astype(np.float64) - 128.0
+        assert abs(deviation.mean()) < 0.5
+        assert 3.5 < deviation.std() < 4.5
+
+    def test_applies_no_other_stage(self) -> None:
+        assert np.array_equal(self.noisy(0.0), self.GREY)
+
+    def test_adds_the_same_noise_to_every_channel(self) -> None:
+        noisy = self.noisy(4.0)
+        assert np.array_equal(noisy[..., 0], noisy[..., 1])
+        assert np.array_equal(noisy[..., 1], noisy[..., 2])
+
+    def test_repeats_itself_on_the_same_image(self) -> None:
+        assert np.array_equal(self.noisy(4.0), self.noisy(4.0))
+
+    def test_draws_new_noise_for_a_different_image(self) -> None:
+        darker = np.full((64, 64, 3), 100, dtype=np.uint8)
+        assert not np.array_equal(self.noisy(4.0) - 128, self.noisy(4.0, darker) - 100)
 
 
 class TestConfig:

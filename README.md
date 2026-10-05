@@ -49,6 +49,7 @@ changes the result:
 |---|---|---|---|
 | 1 | Geometry | The camera is never square-on to the screen, so the image arrives keystoned and slightly rolled | `tilt_x`, `tilt_y` (fractions of the perpendicular dimension), `rotation_deg` |
 | 2 | Tone | The panel's tone curve and gamut replace the scene's: real replays come out more saturated and, on MSU-MFSD, contrastier than the bona fide captures | `contrast`, `saturation`, `black_level`, `white_level` |
+| 2b | Screen and camera | Alternative to stage 5: the image shown on an RGB-stripe screen and photographed onto a Bayer sensor finer than the output, then reduced to it; off by default | `screen_min_pitch_px`, `screen_max_pitch_px` (screen pixel period in sensor pixels), `screen_max_rotation_deg`, `screen_keystone`, `screen_black_matrix`, `camera_psf_sigma_px`, `camera_px_per_output_px`, `camera_sharpening` |
 | 3 | Glare | A light source in the room mirrored on the screen glass | `glare_intensity`, `glare_extent` (fraction of the image width) |
 | 4 | Lens | Defocus and the finite pixel fill factor; off by default, since real replays measure sharper than bona fide | `blur_sigma_px` |
 | 5 | Moiré | The screen's pixel grid beating against the sensor's | `moire_amplitude`, `moire_min_cycles_per_width`, `moire_max_cycles_per_width`, `moire_max_angle_deg`, `moire_chroma_shift_rad`, `moire_cross_weight` |
@@ -92,6 +93,17 @@ contributed almost nothing for four extra parameters and a nested loop, so both 
 out. What survives is one sinusoid per grating direction. If the detector later shows
 those terms matter, they come back with a measurement behind them.
 
+**Or the moiré is simulated rather than drawn.** Stage 2b takes the opposite route to
+stage 5 and builds both grids. Each screen pixel becomes three subpixel columns, red,
+green and blue, with a dimmed row for the black matrix between pixel rows. The screen is
+rotated in its plane and slightly off-parallel, so its pitch drifts across the frame,
+blurred by a Gaussian lens, sampled by an RGGB Bayer sensor and demosaiced, sharpened
+as a phone camera does, recorded with its colour at half resolution as 4:2:0 video
+keeps it, and reduced to the output size by area averaging. The fringes then come out of
+the aliasing between the grids: their frequency, angle and colour follow from the pitch and
+rotation drawn for each attack, they curve where the pitch drifts, and they fade where the
+image is dark. A configuration uses one moiré model or the other, never both.
+
 Every stage switches off through its own parameter, so the neutral configuration is the
 identity function — which is what makes an ablation over the individual artifacts
 possible. Parameters are tuned visually against a synthetic test chart or a real face:
@@ -134,6 +146,19 @@ one corpus uses a generator that has only ever seen that corpus.
 uv run python scripts/calibrate_generator.py --fit replay-mobile --trials 250 --output experiments/moire-fitted-to-replay-mobile.json
 ```
 
+`--screen` fits the screen and camera stage instead, on top of `--generator-config`, whose
+other settings it keeps, so that the two moiré models differ in the moiré alone.
+The `moire-screen-fitted-to-*` configs in `experiments/` are those fits, on top of the
+`-matched-noise` configs, each the best of three searches (`--seed` 0, 1 and 2): seed 1
+for MSU-MFSD and seed 0 for Replay-Mobile. The searches disagree widely on the screen pitch,
+so the stage is less well identified by these statistics than the sinusoidal fringes,
+which stay closer to the MSU-MFSD replays (distance 0.052 against 0.089), while the screen
+is closer to the Replay-Mobile ones (0.227 against 0.281).
+
+```bash
+uv run python scripts/calibrate_generator.py --fit msu --screen --trials 150 --seed 1 --generator-config experiments/moire-fitted-to-msu-matched-noise.json --output experiments/moire-screen-fitted-to-msu.json
+```
+
 Once the parameters are settled, one attack is rendered for every bona fide image in a
 folder. The run writes a `manifest.json` next to the attacks recording the exact generator
 settings and the source each attack came from, so a figure in the thesis traces back to
@@ -166,6 +191,33 @@ recapture rendered from each bona fide training crop, and `mixed` uses both. The
 development partition stays real in all three, so only the training data changes
 between them.
 
+The generator adds sensor noise to every attack it renders, and the two corpora were
+filmed by cameras with different noise levels, so a judge can learn the noise level of
+a camera instead of a recapture. `--noise-real-crops` adds the same noise stage to
+every real training crop too, bona fide and real attacks alike, so that noise no
+longer tells the classes apart.
+The other way round is to match the noise instead of masking it. With
+`noise_to_bona_fide` set, the generator adds, to each attack, the noise that brings its
+measured level to that multiple of the bona fide face it was rendered from, found by
+bisection. The `-matched-noise` configs in `experiments/` set it to the median ratio of
+real replays to bona fide crops in each training partition: 1.24 for MSU-MFSD and 1.11
+for Replay-Mobile.
+`measure_noise.py` prints the evidence for that shortcut: the median noise of the
+training crops of each corpus by species, of the attacks each fitted generator renders
+with, without and with matched noise, and of the bona fide crops once they carry that noise.
+The noise is estimated on luma with Immerkaer's (1996) estimator, in grey levels.
+
+```bash
+uv run python scripts/measure_noise.py
+```
+
+`--synthetic-per-face K` renders K synthetic attacks from each bona fide training crop
+instead of one. Copy k uses the generator seed plus k × 1000, so each copy draws its own
+artifacts, and K = 1 reproduces the single-copy runs exactly.
+`--synthetic-fraction f` goes the other way: synthetic attacks are rendered from a random
+f of the bona fide training crops, drawn with the training seed, so the judge sees fewer
+synthetic attacks than bona fide. f = 1 reproduces the single-copy runs exactly.
+
 `explain_judge.py` shows where a trained judge looks. It computes Grad-CAM of the
 attack logit over the test crops of both corpora, split by species, together with one
 synthetic replay rendered from each bona fide test crop. It writes `attention.json`
@@ -188,7 +240,47 @@ Attacks are scored by a liveness detector and evaluated using standard PAD metri
   whole interval of thresholds equalises the two error rates there, its midpoint
 - **AUC** — threshold-independent measure of separability
 
-Metric definitions follow ISO/IEC 30107-3.
+Metric definitions follow ISO/IEC 30107-3. Accuracy, precision, recall and F1, with the
+attack as the positive class, are reported at the same development threshold. As a
+sensitivity analysis, the thesis also reports the errors at a second threshold, set from
+the development bona fide alone: the lowest one that rejects at most 5% of them.
+
+### Reproducing the thesis
+
+Every table and figure of the results chapter is rendered from `results/` by one
+script, which also prints the paired seed-by-seed differences the text quotes, with
+their bootstrap intervals:
+
+```bash
+uv run python scripts/render_thesis.py
+```
+
+It reads the ten-seed runs of `results/clean`, the reruns with the noise stage off
+(`results/no-noise`, trained with the `-without-noise` configs in `experiments/`) and
+with noise on every real crop (`results/noise-real-crops`), the same runs at other
+synthetic-per-bona-fide ratios (`results/fraction-0.1`, `-0.25`, `-0.5`, `results/copies-3`,
+`-5`; each folder's ratio is read from its reports), the matched-noise and screen runs
+(`results/matched-noise-fraction-1`, `results/matched-noise-copies-3`,
+`results/screen-best-fraction-1`, `results/screen-best-copies-3`), the first-generator runs of
+`results/judges` and the calibration reports, and writes the `.tex` tables and `.pdf`
+figures into `monographs/`. `ablate_generator.py` writes the `ablation.json` behind the
+stage tables, run on every synthetic judge of `results/clean` and
+`results/noise-real-crops`: the median score a trained judge gives to attacks rendered with each
+stage of the generator switched on or off.
+
+```bash
+uv run python scripts/ablate_generator.py --run results/clean/msu-synthetic-seed1
+```
+
+The first generator, tuned by eye, is no longer the code on `main`: its experiments
+were run at the tag `first-generator`. The ablation and calibration scripts run there
+unchanged, against that checkout's package:
+
+```bash
+git worktree add ../first-generator first-generator
+uv run --project ../first-generator python scripts/ablate_generator.py --run results/judges/msu-synthetic-seed1
+uv run --project ../first-generator python ../first-generator/scripts/calibrate_generator.py --output results/calibration-first-generator.json
+```
 
 ## Datasets
 
@@ -232,7 +324,7 @@ synthetic-pad/
 │   ├── calibration.py # image statistics that match generated attacks to real ones
 │   ├── corpora.py     # MSU-MFSD and Replay-Mobile readers: partitions, attack species, face boxes
 │   └── frames.py      # face crops sampled from the corpus videos, and their partitions
-├── scripts/           # command line tools: visual tuning, batch generation
+├── scripts/           # command line tools: tuning, generation, training, the thesis assets
 ├── experiments/       # generator settings fitted to one corpus each
 ├── tests/             # mirrors src/
 ├── data/              # datasets (gitignored)

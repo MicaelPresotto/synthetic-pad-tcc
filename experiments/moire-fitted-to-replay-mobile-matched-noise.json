@@ -1,0 +1,28 @@
+{
+  "fitted_to": "replay-mobile training replays, with the noise matched per face to 1.11 times the bona fide noise, the median ratio of the training replays",
+  "trials": 250,
+  "distance": 0.24508561301231027,
+  "default_distance": 1.090662093023328,
+  "config": {
+    "tilt_x": 0.05,
+    "tilt_y": 0.03,
+    "rotation_deg": 0.8,
+    "contrast": 1.3255601719502723,
+    "saturation": 0.9838807102598106,
+    "black_level": 0.07102817267042137,
+    "white_level": 0.9777488652086957,
+    "glare_intensity": 0.2,
+    "glare_extent": 0.26,
+    "blur_sigma_px": 0.45390875838839495,
+    "moire_amplitude": 0.13888627778321314,
+    "moire_min_cycles_per_width": 2.3462377320019354,
+    "moire_max_cycles_per_width": 14.077426392011613,
+    "moire_max_angle_deg": 90.0,
+    "moire_chroma_shift_rad": 0.9,
+    "moire_cross_weight": 0.45,
+    "noise_sigma_levels": 0.0,
+    "noise_to_bona_fide": 1.11,
+    "variation": 0.25,
+    "seed": 20260823
+  }
+}
