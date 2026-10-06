@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,7 @@ from synthetic_pad.judge.finetuned import (
     FineTunedDetector,
     TrainingConfig,
     build_model,
+    mix_styles,
     train_detector,
 )
 
@@ -38,6 +40,10 @@ class TestTrainingConfig:
         with pytest.raises(ValueError, match="epochs"):
             TrainingConfig(epochs=0)
 
+    def test_rejects_mixstyle_on_a_vision_transformer(self) -> None:
+        with pytest.raises(ValueError, match="MixStyle"):
+            TrainingConfig(architecture="vit_b_16", mixstyle=True)
+
 
 class TestTrainDetector:
     def test_records_one_loss_per_epoch(
@@ -50,6 +56,41 @@ class TestTrainDetector:
     ) -> None:
         images, is_attack = separable_set()
         scores = trained[0].score_batch(images)
+        assert auc(scores[is_attack], scores[~is_attack]) > 0.9
+
+
+class TestMixStyle:
+    @staticmethod
+    def features() -> torch.Tensor:
+        generator = torch.Generator().manual_seed(0)
+        scale = torch.tensor([1.0, 3.0]).view(2, 1, 1, 1)
+        return torch.randn(2, 4, 6, 6, generator=generator) * scale + scale
+
+    def test_a_full_weight_on_itself_leaves_the_features_unchanged(self) -> None:
+        features = self.features()
+        mixed = mix_styles(features, np.ones(2), np.array([1, 0]))
+        torch.testing.assert_close(mixed, features, rtol=1e-4, atol=1e-4)
+
+    def test_a_zero_weight_takes_on_the_partner_statistics(self) -> None:
+        features = self.features()
+        mixed = mix_styles(features, np.zeros(2), np.array([1, 0]))
+        torch.testing.assert_close(
+            mixed.mean(dim=(2, 3)), features.mean(dim=(2, 3)).flip(0), rtol=1e-4, atol=1e-4
+        )
+        torch.testing.assert_close(
+            mixed.std(dim=(2, 3)), features.std(dim=(2, 3)).flip(0), rtol=1e-3, atol=1e-3
+        )
+
+    def test_keeps_the_spatial_pattern_of_each_map(self) -> None:
+        features = self.features()
+        mixed = mix_styles(features, np.full(2, 0.3), np.array([1, 0]))
+        correlation = np.corrcoef(features[0, 0].flatten(), mixed[0, 0].flatten())[0, 1]
+        assert correlation == pytest.approx(1.0)
+
+    def test_a_judge_trained_with_it_still_learns_an_easy_set(self) -> None:
+        images, is_attack = separable_set()
+        detector, _ = train_detector(images, is_attack, replace(TINY, mixstyle=True), device="cpu")
+        scores = detector.score_batch(images)
         assert auc(scores[is_attack], scores[~is_attack]) > 0.9
 
 

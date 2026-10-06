@@ -22,31 +22,45 @@ type AttentionMaps = np.ndarray[Any, np.dtype[np.float64]]
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 SCORING_BATCH = 128
+MIXSTYLE_PROBABILITY = 0.5
+MIXSTYLE_ALPHA = 0.1
+MIXSTYLE_EPSILON = 1e-6
 
 
 @dataclass(frozen=True, slots=True)
 class Architecture:
     """A torchvision network, its ImageNet weights, the classifier replaced by a single
-    attack logit, and the stage Grad-CAM reads, if the network has a convolutional one."""
+    attack logit, the stage Grad-CAM reads and the early stages MixStyle follows, if the
+    network has convolutional ones."""
 
     build: Callable[..., nn.Module]
     weights: models.WeightsEnum
     head: str
     grad_cam_stage: str | None
+    mixstyle_stages: tuple[str, ...]
 
 
+RESNET_EARLY_STAGES = ("layer1", "layer2", "layer3")
 ARCHITECTURES = {
     "resnet18": Architecture(
-        models.resnet18, models.ResNet18_Weights.IMAGENET1K_V1, "fc", "layer4"
+        models.resnet18,
+        models.ResNet18_Weights.IMAGENET1K_V1,
+        "fc",
+        "layer4",
+        RESNET_EARLY_STAGES,
     ),
     "resnet50": Architecture(
-        models.resnet50, models.ResNet50_Weights.IMAGENET1K_V2, "fc", "layer4"
+        models.resnet50,
+        models.ResNet50_Weights.IMAGENET1K_V2,
+        "fc",
+        "layer4",
+        RESNET_EARLY_STAGES,
     ),
     "vit_b_16": Architecture(
-        models.vit_b_16, models.ViT_B_16_Weights.IMAGENET1K_V1, "heads.head", None
+        models.vit_b_16, models.ViT_B_16_Weights.IMAGENET1K_V1, "heads.head", None, ()
     ),
     "vit_b_32": Architecture(
-        models.vit_b_32, models.ViT_B_32_Weights.IMAGENET1K_V1, "heads.head", None
+        models.vit_b_32, models.ViT_B_32_Weights.IMAGENET1K_V1, "heads.head", None, ()
     ),
 }
 
@@ -59,11 +73,14 @@ class TrainingConfig:
     batch_size: int = 64
     learning_rate: float = 1e-4
     weight_decay: float = 1e-4
+    mixstyle: bool = False
     seed: int = 20260928
 
     def __post_init__(self) -> None:
         if self.architecture not in ARCHITECTURES:
             raise ValueError(f"architecture must be one of {sorted(ARCHITECTURES)}")
+        if self.mixstyle and not ARCHITECTURES[self.architecture].mixstyle_stages:
+            raise ValueError(f"{self.architecture} has no convolutional stages for MixStyle")
         require_positive(
             epochs=self.epochs, batch_size=self.batch_size, learning_rate=self.learning_rate
         )
@@ -154,6 +171,10 @@ def train_detector(
     optimiser = torch.optim.AdamW(
         model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
     )
+    stages = ARCHITECTURES[config.architecture].mixstyle_stages if config.mixstyle else ()
+    hooks = [
+        model.get_submodule(stage).register_forward_hook(_mixstyle_hook(rng)) for stage in stages
+    ]
 
     epoch_losses = []
     for _ in range(config.epochs):
@@ -171,7 +192,35 @@ def train_detector(
             optimiser.step()
             batch_losses.append(float(loss.detach().cpu()))
         epoch_losses.append(float(np.mean(batch_losses)))
+    for hook in hooks:
+        hook.remove()
     return FineTunedDetector(model, config.architecture, device), epoch_losses
+
+
+def mix_styles(features: torch.Tensor, weights: np.ndarray, partners: np.ndarray) -> torch.Tensor:
+    """MixStyle (Zhou et al., 2021): each feature map is renormalised to a convex mix, with
+    its weight in [0, 1], of its own channel mean and standard deviation and its partner's."""
+    mean = features.mean(dim=(2, 3), keepdim=True).detach()
+    std = (features.var(dim=(2, 3), keepdim=True) + MIXSTYLE_EPSILON).sqrt().detach()
+    weight = torch.as_tensor(weights, dtype=features.dtype, device=features.device)
+    weight = weight.view(-1, 1, 1, 1)
+    partner = torch.as_tensor(partners, device=features.device)
+    mixed_mean = weight * mean + (1 - weight) * mean[partner]
+    mixed_std = weight * std + (1 - weight) * std[partner]
+    return (features - mean) / std * mixed_std + mixed_mean
+
+
+def _mixstyle_hook(
+    rng: np.random.Generator,
+) -> Callable[[nn.Module, object, torch.Tensor], torch.Tensor]:
+    def hook(module: nn.Module, _inputs: object, features: torch.Tensor) -> torch.Tensor:
+        if not module.training or rng.random() >= MIXSTYLE_PROBABILITY:
+            return features
+        count = len(features)
+        weights = rng.beta(MIXSTYLE_ALPHA, MIXSTYLE_ALPHA, count)
+        return mix_styles(features, weights, rng.permutation(count))
+
+    return hook
 
 
 def _to_tensor(images: Batch, device: str, mirrored: Labels | None = None) -> torch.Tensor:
