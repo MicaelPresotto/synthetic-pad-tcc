@@ -422,9 +422,10 @@ def generators_table(real: Runs, variants: Sequence[tuple[str, Runs]]) -> str:
         "Cross-dataset HTER (\\%) and replay AUC for each version of the generator, with no "
         "noise on the real training crops: the sinusoidal fringes of Table~\\ref{tab:main} with "
         "the fixed noise level of the calibration or with the noise matched to the real replays, "
-        "and the "
-        "simulated screen with matched noise, rendering one or three synthetic attacks per bona "
-        "fide crop. Mean over ten seeds.",
+        "the simulated screen with matched noise, rendering one or three synthetic attacks per "
+        "bona fide crop, and the transfer of the amplitude spectrum of the real replays of the "
+        "source dataset onto its bona fide crops, up to 0.07 or 0.02 cycles per pixel. Mean over "
+        "ten seeds.",
         "tab:generators",
         "l" + CENTRED_X * 4,
         "& \\multicolumn{2}{c}{\\textbf{Synthetic}} & \\multicolumn{2}{c}{\\textbf{Mixed}} \\\\\n"
@@ -770,6 +771,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="simulated screen with matched noise, one and three synthetic attacks per crop",
     )
     parser.add_argument(
+        "--spectral",
+        type=Path,
+        nargs=2,
+        metavar=("MAIN", "NARROW"),
+        default=[Path("results/spectral-band-0.07"), Path("results/spectral-band-0.02")],
+        help="spectral transfer from the real source replays, with the main and the narrow band",
+    )
+    parser.add_argument(
         "--vit",
         type=Path,
         default=Path("results/vit-matched-noise"),
@@ -802,6 +811,7 @@ def main() -> None:
     by_ratio = runs_by_ratio(args.synthetic_ratios)
     matched_one, matched_three = (find_runs(path) for path in args.matched_noise)
     screen_one, screen_three = (find_runs(path) for path in args.screen)
+    spectral_main, spectral_narrow = (find_runs(path) for path in args.spectral)
     vit = find_runs(args.vit)
     first_generator = json.loads(args.first_generator_calibration.read_text())
     calibrated = {
@@ -826,6 +836,8 @@ def main() -> None:
                 ("\\quad three per crop", matched_three),
                 ("Screen, matched noise", screen_one),
                 ("\\quad three per crop", screen_three),
+                ("Spectral transfer, 0.07 cycles/px", spectral_main),
+                ("\\quad 0.02 cycles/px", spectral_narrow),
             ),
         ),
         "tab-ablation-generators.tex": generators_ablation_table(matched_one, screen_one),
@@ -853,6 +865,8 @@ def main() -> None:
         ("sinusoidal, matched noise, three per crop", matched_three),
         ("screen, matched noise", screen_one),
         ("screen, matched noise, three per crop", screen_three),
+        ("spectral transfer, 0.07 cycles per pixel", spectral_main),
+        ("spectral transfer, 0.02 cycles per pixel", spectral_narrow),
     ):
         print_paired_differences(title, {**runs, **real_only})
     print_paired_differences("ViT-B/16, sinusoidal, matched noise", vit)
