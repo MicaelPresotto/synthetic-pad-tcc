@@ -104,8 +104,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
     training = json.loads((args.run / "report.json").read_text())["training"]
+    recorded = training.get("generator") or {}
+    settings = {name: value for name, value in recorded.items() if name != "generator"}
     detector = FineTunedDetector.load(args.run / "judge.pt", args.device)
-    generator = MoireRecaptureGenerator(MoireConfig(seed=training["config"]["seed"]))
+    generator = MoireRecaptureGenerator(MoireConfig(**settings))
 
     summary = {}
     for name, images in groups(load_partitions(args.frames), training["corpus"], generator).items():
