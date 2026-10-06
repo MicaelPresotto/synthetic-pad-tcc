@@ -538,6 +538,44 @@ def paired_difference(trained: dict[int, Path], reference: dict[int, Path]) -> t
     return difference_with_interval(differences), f"{improved}/{differences.size}"
 
 
+def mixstyle_table(real: Runs, mixed: Runs, mixstyle: Runs) -> str:
+    rows = []
+    for source, target in DIRECTIONS:
+        rows.append(direction_heading(source, target, 6))
+        reference = real[(source, "real")]
+        for title, runs in (
+            ("Real", reference),
+            ("Real + MixStyle", mixstyle[(source, "real")]),
+            ("Mixed", mixed[(source, "mixed")]),
+            ("Mixed + MixStyle", mixstyle[(source, "mixed")]),
+        ):
+            difference = (
+                (NOT_RUN, NOT_RUN) if runs is reference else paired_difference(runs, reference)
+            )
+            cells = [
+                title,
+                percent_mean(runs, hter_of("intra")),
+                percent_mean(runs, hter_of("cross")),
+                *difference,
+                f"{measured(runs, cross_auc('replay')).mean():.3f}",
+            ]
+            rows.append("\t\t" + " & ".join(cells) + " \\\\")
+        if source != DIRECTIONS[-1][0]:
+            rows.append("\t\t\\midrule")
+    return table(
+        "Detectors trained with and without MixStyle on real or mixed attacks, with the "
+        "sinusoidal fringes and matched noise: intra-dataset and cross-dataset HTER (\\%), "
+        "the paired cross-dataset difference to the real detector without MixStyle with its "
+        "95\\% bootstrap interval and the seeds in which it improved, and the replay AUC. "
+        "Mean over ten seeds.",
+        "tab:mixstyle",
+        "l" + CENTRED_X * 2 + "cc" + CENTRED_X,
+        "\\textbf{Attacks} & \\textbf{HTER intra} & \\textbf{HTER cross} & "
+        "\\textbf{Cross $-$ real} & \\textbf{Seeds} & \\textbf{AUC replay}",
+        rows,
+    )
+
+
 def splits_table(splits: Sequence[tuple[str, Runs]]) -> str:
     rows = []
     for title, runs in splits:
@@ -876,6 +914,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="real and mixed MSU-MFSD judges with other draws of the development subjects",
     )
     parser.add_argument(
+        "--mixstyle",
+        type=Path,
+        default=Path("results/mixstyle"),
+        help="real and mixed ResNet-18 judges trained with MixStyle, matched-noise generator",
+    )
+    parser.add_argument(
         "--vit",
         type=Path,
         nargs=2,
@@ -951,6 +995,7 @@ def main() -> None:
                 ("ViT-B/32", vit_b32),
             )
         ),
+        "tab-mixstyle.tex": mixstyle_table(clean, matched_one, find_runs(args.mixstyle)),
         "tab-splits.tex": splits_table(splits),
         "tab-calibration.tex": calibration_table(first_generator),
     }
