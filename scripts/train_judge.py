@@ -140,6 +140,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--epochs", type=int, default=DEFAULTS.epochs)
     parser.add_argument("--seed", type=int, default=DEFAULTS.seed)
     parser.add_argument("--no-pretrained", action="store_true", help="random initial weights")
+    parser.add_argument(
+        "--mixstyle",
+        action="store_true",
+        help="mix the channel statistics of pairs of training crops after the early "
+        "convolutional stages (MixStyle), so that the judge cannot rely on their style",
+    )
     parser.add_argument("--device", default="mps" if torch.backends.mps.is_available() else "cpu")
     return parser
 
@@ -157,6 +163,7 @@ def main() -> None:
         architecture=args.architecture,
         pretrained=not args.no_pretrained,
         epochs=args.epochs,
+        mixstyle=args.mixstyle,
         seed=args.seed,
     )
     partitions = load_partitions(args.frames, args.msu_split_seed)
