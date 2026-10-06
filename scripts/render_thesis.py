@@ -505,6 +505,53 @@ def architectures_table(resnet: Runs, vit: Runs) -> str:
     )
 
 
+def development_subjects(runs: dict[int, Path]) -> str:
+    (subjects,) = {
+        tuple(report(run)["training"]["msu_development_subjects"]) for run in runs.values()
+    }
+    return ", ".join(subjects)
+
+
+def paired_difference(trained: dict[int, Path], reference: dict[int, Path]) -> str:
+    seeds = sorted(set(reference) & set(trained))
+    pick = on_report(hter_of("cross"))
+    differences = 100.0 * np.array([pick(trained[s]) - pick(reference[s]) for s in seeds])
+    low, high = bootstrap_interval(differences)
+    improved = int(np.sum(differences < 0))
+    return f"${differences.mean():+.1f}$ [{low:+.1f}, {high:+.1f}], {improved}/{len(seeds)}"
+
+
+def splits_table(splits: Sequence[tuple[str, Runs]]) -> str:
+    rows = []
+    for title, runs in splits:
+        real, mixed = runs[("msu", "real")], runs[("msu", "mixed")]
+        cells = [
+            title,
+            development_subjects(real),
+            percent_mean(real, hter_of("cross")),
+            percent_mean(mixed, hter_of("cross")),
+            paired_difference(mixed, real),
+            f"{measured(real, cross_auc('replay')).mean():.3f}",
+            f"{measured(mixed, cross_auc('replay')).mean():.3f}",
+        ]
+        rows.append("\t\t" + " & ".join(cells) + " \\\\")
+    return table(
+        "From MSU-MFSD to Replay-Mobile, with a different draw of the five training subjects "
+        "held out as the development partition: cross-dataset HTER (\\%) of the real and the "
+        "mixed detectors with matched noise, the paired difference with its 95\\% bootstrap "
+        "interval and the seeds in which the mixed detector improved, and the replay AUC. "
+        "Mean over ten seeds.",
+        "tab:splits",
+        "ll" + CENTRED_X * 5,
+        "& & \\multicolumn{3}{c}{\\textbf{HTER cross}} & "
+        "\\multicolumn{2}{c}{\\textbf{AUC replay}} \\\\\n"
+        "\t\t\\cmidrule(lr){3-5} \\cmidrule(lr){6-7}\n"
+        "\t\t\\textbf{Split} & \\textbf{Development subjects} & \\textbf{Real} & "
+        "\\textbf{Mixed} & \\textbf{Mixed $-$ real} & \\textbf{Real} & \\textbf{Mixed}",
+        rows,
+    )
+
+
 def synthetic_ratio(run: Path) -> float:
     """Synthetic attacks per bona fide training crop; runs from before the ratio flags had one."""
     training = report(run)["training"]
@@ -779,6 +826,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="spectral transfer from the real source replays, with the main and the narrow band",
     )
     parser.add_argument(
+        "--msu-splits",
+        type=Path,
+        nargs="+",
+        default=[Path("results/msu-split-1"), Path("results/msu-split-2")],
+        help="real and mixed MSU-MFSD judges with other draws of the development subjects",
+    )
+    parser.add_argument(
         "--vit",
         type=Path,
         default=Path("results/vit-matched-noise"),
@@ -813,6 +867,10 @@ def main() -> None:
     screen_one, screen_three = (find_runs(path) for path in args.screen)
     spectral_main, spectral_narrow = (find_runs(path) for path in args.spectral)
     vit = find_runs(args.vit)
+    splits = [
+        ("Original", {**real_only, ("msu", "mixed"): matched_one[("msu", "mixed")]}),
+        *((f"Split {index}", find_runs(path)) for index, path in enumerate(args.msu_splits, 1)),
+    ]
     first_generator = json.loads(args.first_generator_calibration.read_text())
     calibrated = {
         corpus: json.loads(path.read_text())
@@ -842,6 +900,7 @@ def main() -> None:
         ),
         "tab-ablation-generators.tex": generators_ablation_table(matched_one, screen_one),
         "tab-architectures.tex": architectures_table({**matched_one, **real_only}, vit),
+        "tab-splits.tex": splits_table(splits),
         "tab-calibration.tex": calibration_table(first_generator),
     }
     for name, content in outputs.items():
