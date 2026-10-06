@@ -471,6 +471,39 @@ def generators_ablation_table(sinusoidal: Runs, screen: Runs) -> str:
     )
 
 
+def architectures_table(resnet: Runs, vit: Runs) -> str:
+    def errors(runs: dict[int, Path]) -> list[str]:
+        replay_auc = measured(runs, cross_auc("replay")).mean()
+        return [
+            percent_mean(runs, hter_of("intra")),
+            percent_mean(runs, hter_of("cross")),
+            f"{replay_auc:.3f}",
+        ]
+
+    rows = []
+    for source, target in DIRECTIONS:
+        rows.append(direction_heading(source, target, 7))
+        for data in CONFIGURATIONS:
+            cells = [errors(runs[(source, data)]) for runs in (resnet, vit)]
+            rows.append("\t\t" + " & ".join([data.capitalize(), *cells[0], *cells[1]]) + " \\\\")
+        if source != DIRECTIONS[-1][0]:
+            rows.append("\t\t\\midrule")
+    return table(
+        "Intra-dataset HTER (\\%), cross-dataset HTER (\\%) and replay AUC of the ResNet-18 and "
+        "the ViT-B/16 trained on real, synthetic and mixed attacks, with the sinusoidal fringes "
+        "and matched noise. Mean over ten seeds.",
+        "tab:architectures",
+        "l" + CENTRED_X * 6,
+        "& \\multicolumn{3}{c}{\\textbf{ResNet-18}} & "
+        "\\multicolumn{3}{c}{\\textbf{ViT-B/16}} \\\\\n"
+        "\t\t\\cmidrule(lr){2-4} \\cmidrule(lr){5-7}\n"
+        "\t\t\\textbf{Attacks} & \\textbf{HTER intra} & \\textbf{HTER cross} & "
+        "\\textbf{AUC replay} & \\textbf{HTER intra} & \\textbf{HTER cross} & "
+        "\\textbf{AUC replay}",
+        rows,
+    )
+
+
 def synthetic_ratio(run: Path) -> float:
     """Synthetic attacks per bona fide training crop; runs from before the ratio flags had one."""
     training = report(run)["training"]
@@ -736,6 +769,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=[Path("results/screen-best-fraction-1"), Path("results/screen-best-copies-3")],
         help="simulated screen with matched noise, one and three synthetic attacks per crop",
     )
+    parser.add_argument(
+        "--vit",
+        type=Path,
+        default=Path("results/vit-matched-noise"),
+        help="ViT-B/16 judges, real, synthetic and mixed, with the matched-noise generator",
+    )
     parser.add_argument("--first-generator-runs", type=Path, default=Path("results/judges"))
     parser.add_argument(
         "--first-generator-calibration",
@@ -763,6 +802,7 @@ def main() -> None:
     by_ratio = runs_by_ratio(args.synthetic_ratios)
     matched_one, matched_three = (find_runs(path) for path in args.matched_noise)
     screen_one, screen_three = (find_runs(path) for path in args.screen)
+    vit = find_runs(args.vit)
     first_generator = json.loads(args.first_generator_calibration.read_text())
     calibrated = {
         corpus: json.loads(path.read_text())
@@ -789,6 +829,7 @@ def main() -> None:
             ),
         ),
         "tab-ablation-generators.tex": generators_ablation_table(matched_one, screen_one),
+        "tab-architectures.tex": architectures_table({**matched_one, **real_only}, vit),
         "tab-calibration.tex": calibration_table(first_generator),
     }
     for name, content in outputs.items():
@@ -814,6 +855,7 @@ def main() -> None:
         ("screen, matched noise, three per crop", screen_three),
     ):
         print_paired_differences(title, {**runs, **real_only})
+    print_paired_differences("ViT-B/16, sinusoidal, matched noise", vit)
     print_spectrum_fit(calibrated)
 
 
