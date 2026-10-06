@@ -12,7 +12,14 @@ from synthetic_pad.calibration import read_fitted_config
 from synthetic_pad.corpora import REPLAY
 from synthetic_pad.domain import AttackGenerator, RgbImage
 from synthetic_pad.evaluation.report import pad_report
-from synthetic_pad.frames import CORPORA, CropSample, load_partitions, read_crops, select
+from synthetic_pad.frames import (
+    CORPORA,
+    MSU_SPLIT_SEED,
+    CropSample,
+    load_partitions,
+    read_crops,
+    select,
+)
 from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
 from synthetic_pad.generators.spectral import SpectralConfig, SpectralTransferGenerator
 from synthetic_pad.judge.finetuned import (
@@ -122,6 +129,12 @@ def build_parser() -> argparse.ArgumentParser:
         "attacks are rendered from; below 1 the judge sees fewer synthetic than bona fide",
     )
     parser.add_argument("--frames", type=Path, default=Path("data/frames"))
+    parser.add_argument(
+        "--msu-split-seed",
+        type=int,
+        default=MSU_SPLIT_SEED,
+        help="seed that draws the MSU-MFSD training subjects held out as its development set",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--architecture", choices=sorted(ARCHITECTURES), default="resnet18")
     parser.add_argument("--epochs", type=int, default=DEFAULTS.epochs)
@@ -146,7 +159,7 @@ def main() -> None:
         epochs=args.epochs,
         seed=args.seed,
     )
-    partitions = load_partitions(args.frames)
+    partitions = load_partitions(args.frames, args.msu_split_seed)
     source = partitions[args.train_corpus]
     target_corpus = next(corpus for corpus in CORPORA if corpus != args.train_corpus)
     copy_seeds = [args.seed + copy * COPY_SEED_STRIDE for copy in range(args.synthetic_per_face)]
@@ -203,6 +216,7 @@ def main() -> None:
             "epoch_losses": losses,
             "bona_fide_crops": int(np.sum(~is_attack)),
             "attack_crops": int(np.sum(is_attack)),
+            "msu_split_seed": args.msu_split_seed,
             "msu_development_subjects": sorted(
                 {s.subject for s in partitions["msu"] if s.partition == "devel"}
             ),

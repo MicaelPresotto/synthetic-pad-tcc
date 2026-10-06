@@ -153,11 +153,13 @@ def hold_out_subjects(
     ]
 
 
-def load_partitions(frames_root: Path) -> dict[str, list[CropSample]]:
+def load_partitions(
+    frames_root: Path, msu_split_seed: int = MSU_SPLIT_SEED
+) -> dict[str, list[CropSample]]:
     """Crops of every corpus; MSU-MFSD has no development partition, so five of its
-    training subjects are held out as one."""
+    training subjects, drawn with the split seed, are held out as one."""
     msu = hold_out_subjects(
-        load_crops(frames_root / "msu"), "train", "devel", MSU_DEVELOPMENT_SUBJECTS, MSU_SPLIT_SEED
+        load_crops(frames_root / "msu"), "train", "devel", MSU_DEVELOPMENT_SUBJECTS, msu_split_seed
     )
     return {"msu": msu, "replay-mobile": load_crops(frames_root / "replay-mobile")}
 
