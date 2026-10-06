@@ -38,6 +38,7 @@ GRID = "#d9d8d4"
 SOURCE_LINE = r"{\footnotesize Source: prepared by the author (2026).}"
 NOT_RUN = "--"
 COLUMN_GAP_PT = 4
+MSU_SPLIT_DRAWS = 8
 CENTRED_X = ">{\\centering\\arraybackslash}X"
 
 type Report = dict[str, Any]
@@ -518,14 +519,23 @@ def development_subjects(runs: dict[int, Path]) -> str:
     return ", ".join(subjects)
 
 
-def paired_difference(trained: dict[int, Path], reference: dict[int, Path]) -> tuple[str, str]:
-    """The mean cross HTER difference with its bootstrap interval, and the seeds improved."""
+def cross_hter_differences(trained: dict[int, Path], reference: dict[int, Path]) -> np.ndarray:
+    """Cross-dataset HTER of each trained run minus its reference of the same seed, in points."""
     seeds = sorted(set(reference) & set(trained))
     pick = on_report(hter_of("cross"))
-    differences = 100.0 * np.array([pick(trained[s]) - pick(reference[s]) for s in seeds])
+    return 100.0 * np.array([pick(trained[s]) - pick(reference[s]) for s in seeds])
+
+
+def difference_with_interval(differences: np.ndarray) -> str:
     low, high = bootstrap_interval(differences)
+    return f"${differences.mean():+.1f}$ [${low:+.1f}$, ${high:+.1f}$]"
+
+
+def paired_difference(trained: dict[int, Path], reference: dict[int, Path]) -> tuple[str, str]:
+    """The mean cross HTER difference with its bootstrap interval, and the seeds improved."""
+    differences = cross_hter_differences(trained, reference)
     improved = int(np.sum(differences < 0))
-    return f"${differences.mean():+.1f}$ [${low:+.1f}$, ${high:+.1f}$]", f"{improved}/{len(seeds)}"
+    return difference_with_interval(differences), f"{improved}/{differences.size}"
 
 
 def splits_table(splits: Sequence[tuple[str, Runs]]) -> str:
@@ -542,12 +552,15 @@ def splits_table(splits: Sequence[tuple[str, Runs]]) -> str:
             f"{measured(mixed, cross_auc('replay')).mean():.3f}",
         ]
         rows.append("\t\t" + " & ".join(cells) + " \\\\")
+    rows.append("\t\t\\midrule")
+    rows.append("\t\t" + " & ".join(pooled_splits_cells(splits)) + " \\\\")
     return table(
         "From MSU-MFSD to Replay-Mobile, with a different draw of the five training subjects "
         "held out as the development partition: cross-dataset HTER (\\%) of the real and the "
         "mixed detectors with matched noise, the paired difference with its 95\\% bootstrap "
         "interval and the seeds in which the mixed detector improved, and the replay AUC. "
-        "Mean over ten seeds.",
+        "Mean over ten seeds; the last row pools the draws, and its interval resamples the "
+        "draws rather than the seeds.",
         "tab:splits",
         "ll" + CENTRED_X * 2 + "cc" + CENTRED_X * 2,
         "& & \\multicolumn{4}{c}{\\textbf{HTER cross}} & "
@@ -558,6 +571,28 @@ def splits_table(splits: Sequence[tuple[str, Runs]]) -> str:
         "\\textbf{Mixed}",
         rows,
     )
+
+
+def pooled_splits_cells(splits: Sequence[tuple[str, Runs]]) -> list[str]:
+    """All draws together: mean errors over every run, and the mean of the per-draw differences
+    with an interval that resamples the draws, since the seeds of one draw share its subjects."""
+    pairs = [(runs[("msu", "real")], runs[("msu", "mixed")]) for _, runs in splits]
+    differences = [cross_hter_differences(mixed, real) for real, mixed in pairs]
+
+    def pooled(pick: Callable[[Report], float], index: int) -> np.ndarray:
+        return np.concatenate([measured(pair[index], pick) for pair in pairs])
+
+    improved = sum(int(np.sum(draw < 0)) for draw in differences)
+    return [
+        f"All {len(splits)} draws",
+        NOT_RUN,
+        f"{100 * pooled(hter_of('cross'), 0).mean():.1f}",
+        f"{100 * pooled(hter_of('cross'), 1).mean():.1f}",
+        difference_with_interval(np.array([draw.mean() for draw in differences])),
+        f"{improved}/{sum(draw.size for draw in differences)}",
+        f"{pooled(cross_auc('replay'), 0).mean():.3f}",
+        f"{pooled(cross_auc('replay'), 1).mean():.3f}",
+    ]
 
 
 def synthetic_ratio(run: Path) -> float:
@@ -837,7 +872,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--msu-splits",
         type=Path,
         nargs="+",
-        default=[Path("results/msu-split-1"), Path("results/msu-split-2")],
+        default=[Path(f"results/msu-split-{draw}") for draw in range(1, MSU_SPLIT_DRAWS + 1)],
         help="real and mixed MSU-MFSD judges with other draws of the development subjects",
     )
     parser.add_argument(
