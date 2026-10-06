@@ -512,13 +512,14 @@ def development_subjects(runs: dict[int, Path]) -> str:
     return ", ".join(subjects)
 
 
-def paired_difference(trained: dict[int, Path], reference: dict[int, Path]) -> str:
+def paired_difference(trained: dict[int, Path], reference: dict[int, Path]) -> tuple[str, str]:
+    """The mean cross HTER difference with its bootstrap interval, and the seeds improved."""
     seeds = sorted(set(reference) & set(trained))
     pick = on_report(hter_of("cross"))
     differences = 100.0 * np.array([pick(trained[s]) - pick(reference[s]) for s in seeds])
     low, high = bootstrap_interval(differences)
     improved = int(np.sum(differences < 0))
-    return f"${differences.mean():+.1f}$ [{low:+.1f}, {high:+.1f}], {improved}/{len(seeds)}"
+    return f"${differences.mean():+.1f}$ [${low:+.1f}$, ${high:+.1f}$]", f"{improved}/{len(seeds)}"
 
 
 def splits_table(splits: Sequence[tuple[str, Runs]]) -> str:
@@ -530,7 +531,7 @@ def splits_table(splits: Sequence[tuple[str, Runs]]) -> str:
             development_subjects(real),
             percent_mean(real, hter_of("cross")),
             percent_mean(mixed, hter_of("cross")),
-            paired_difference(mixed, real),
+            *paired_difference(mixed, real),
             f"{measured(real, cross_auc('replay')).mean():.3f}",
             f"{measured(mixed, cross_auc('replay')).mean():.3f}",
         ]
@@ -542,12 +543,13 @@ def splits_table(splits: Sequence[tuple[str, Runs]]) -> str:
         "interval and the seeds in which the mixed detector improved, and the replay AUC. "
         "Mean over ten seeds.",
         "tab:splits",
-        "ll" + CENTRED_X * 5,
-        "& & \\multicolumn{3}{c}{\\textbf{HTER cross}} & "
+        "ll" + CENTRED_X * 2 + "cc" + CENTRED_X * 2,
+        "& & \\multicolumn{4}{c}{\\textbf{HTER cross}} & "
         "\\multicolumn{2}{c}{\\textbf{AUC replay}} \\\\\n"
-        "\t\t\\cmidrule(lr){3-5} \\cmidrule(lr){6-7}\n"
+        "\t\t\\cmidrule(lr){3-6} \\cmidrule(lr){7-8}\n"
         "\t\t\\textbf{Split} & \\textbf{Development subjects} & \\textbf{Real} & "
-        "\\textbf{Mixed} & \\textbf{Mixed $-$ real} & \\textbf{Real} & \\textbf{Mixed}",
+        "\\textbf{Mixed} & \\textbf{Mixed $-$ real} & \\textbf{Seeds} & \\textbf{Real} & "
+        "\\textbf{Mixed}",
         rows,
     )
 
