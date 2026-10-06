@@ -472,7 +472,7 @@ def generators_ablation_table(sinusoidal: Runs, screen: Runs) -> str:
     )
 
 
-def architectures_table(resnet: Runs, vit: Runs) -> str:
+def architectures_table(architectures: Sequence[tuple[str, Runs]]) -> str:
     def errors(runs: dict[int, Path]) -> list[str]:
         replay_auc = measured(runs, cross_auc("replay")).mean()
         return [
@@ -481,26 +481,32 @@ def architectures_table(resnet: Runs, vit: Runs) -> str:
             f"{replay_auc:.3f}",
         ]
 
+    width = 1 + 3 * len(architectures)
     rows = []
     for source, target in DIRECTIONS:
-        rows.append(direction_heading(source, target, 7))
+        rows.append(direction_heading(source, target, width))
         for data in CONFIGURATIONS:
-            cells = [errors(runs[(source, data)]) for runs in (resnet, vit)]
-            rows.append("\t\t" + " & ".join([data.capitalize(), *cells[0], *cells[1]]) + " \\\\")
+            cells = [cell for _, runs in architectures for cell in errors(runs[(source, data)])]
+            rows.append("\t\t" + " & ".join([data.capitalize(), *cells]) + " \\\\")
         if source != DIRECTIONS[-1][0]:
             rows.append("\t\t\\midrule")
+    groups = " & ".join(
+        f"\\multicolumn{{3}}{{c}}{{\\textbf{{{title}}}}}" for title, _ in architectures
+    )
+    rules = " ".join(
+        f"\\cmidrule(lr){{{2 + 3 * index}-{4 + 3 * index}}}" for index in range(len(architectures))
+    )
+    measures = " & ".join(
+        ["\\textbf{HTER intra} & \\textbf{HTER cross} & \\textbf{AUC replay}"] * len(architectures)
+    )
+    names = ", ".join(title for title, _ in architectures[:-1]) + f" and the {architectures[-1][0]}"
     return table(
-        "Intra-dataset HTER (\\%), cross-dataset HTER (\\%) and replay AUC of the ResNet-18 and "
-        "the ViT-B/16 trained on real, synthetic and mixed attacks, with the sinusoidal fringes "
-        "and matched noise. Mean over ten seeds.",
+        f"Intra-dataset HTER (\\%), cross-dataset HTER (\\%) and replay AUC of the {names} "
+        "trained on real, synthetic and mixed attacks, with the sinusoidal fringes and matched "
+        "noise. Mean over ten seeds.",
         "tab:architectures",
-        "l" + CENTRED_X * 6,
-        "& \\multicolumn{3}{c}{\\textbf{ResNet-18}} & "
-        "\\multicolumn{3}{c}{\\textbf{ViT-B/16}} \\\\\n"
-        "\t\t\\cmidrule(lr){2-4} \\cmidrule(lr){5-7}\n"
-        "\t\t\\textbf{Attacks} & \\textbf{HTER intra} & \\textbf{HTER cross} & "
-        "\\textbf{AUC replay} & \\textbf{HTER intra} & \\textbf{HTER cross} & "
-        "\\textbf{AUC replay}",
+        "l" + CENTRED_X * (width - 1),
+        f"& {groups} \\\\\n\t\t{rules}\n\t\t\\textbf{{Attacks}} & {measures}",
         rows,
     )
 
@@ -837,8 +843,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--vit",
         type=Path,
-        default=Path("results/vit-matched-noise"),
-        help="ViT-B/16 judges, real, synthetic and mixed, with the matched-noise generator",
+        nargs=2,
+        metavar=("B16", "B32"),
+        default=[Path("results/vit-matched-noise"), Path("results/vit-b32-matched-noise")],
+        help="ViT-B/16 and ViT-B/32 judges, real, synthetic and mixed, matched-noise generator",
     )
     parser.add_argument("--first-generator-runs", type=Path, default=Path("results/judges"))
     parser.add_argument(
@@ -868,7 +876,7 @@ def main() -> None:
     matched_one, matched_three = (find_runs(path) for path in args.matched_noise)
     screen_one, screen_three = (find_runs(path) for path in args.screen)
     spectral_main, spectral_narrow = (find_runs(path) for path in args.spectral)
-    vit = find_runs(args.vit)
+    vit_b16, vit_b32 = (find_runs(path) for path in args.vit)
     splits = [
         ("Original", {**real_only, ("msu", "mixed"): matched_one[("msu", "mixed")]}),
         *((f"Split {index}", find_runs(path)) for index, path in enumerate(args.msu_splits, 1)),
@@ -901,7 +909,13 @@ def main() -> None:
             ),
         ),
         "tab-ablation-generators.tex": generators_ablation_table(matched_one, screen_one),
-        "tab-architectures.tex": architectures_table({**matched_one, **real_only}, vit),
+        "tab-architectures.tex": architectures_table(
+            (
+                ("ResNet-18", {**matched_one, **real_only}),
+                ("ViT-B/16", vit_b16),
+                ("ViT-B/32", vit_b32),
+            )
+        ),
         "tab-splits.tex": splits_table(splits),
         "tab-calibration.tex": calibration_table(first_generator),
     }
@@ -930,7 +944,8 @@ def main() -> None:
         ("spectral transfer, 0.02 cycles per pixel", spectral_narrow),
     ):
         print_paired_differences(title, {**runs, **real_only})
-    print_paired_differences("ViT-B/16, sinusoidal, matched noise", vit)
+    print_paired_differences("ViT-B/16, sinusoidal, matched noise", vit_b16)
+    print_paired_differences("ViT-B/32, sinusoidal, matched noise", vit_b32)
     print_spectrum_fit(calibrated)
 
 
