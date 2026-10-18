@@ -326,6 +326,34 @@ def score_range(values: Sequence[float]) -> str:
     return low if low == high else f"{low}--{high}"
 
 
+def first_generator_table(runs: Runs) -> str:
+    rows = []
+    for source, target in DIRECTIONS:
+        rows.append(direction_heading(source, target, 5))
+        for data in ("real", "synthetic"):
+            trained = runs[(source, data)]
+            cells = [
+                data.capitalize(),
+                percent(measured(trained, hter_of("intra"))),
+                ratio(measured(trained, intra_auc(None))),
+                percent(measured(trained, hter_of("cross"))),
+                ratio(measured(trained, cross_auc(None))),
+            ]
+            rows.append("\t\t" + " & ".join(cells) + " \\\\")
+        if source != DIRECTIONS[-1][0]:
+            rows.append("\t\t\\midrule")
+    return table(
+        "Detectors trained on real attacks and on the synthetic attacks of the first generator "
+        "alone: HTER (\\%) at the development threshold and AUC, within the source dataset and "
+        "across datasets, mean and standard deviation over three seeds.",
+        "tab:first-generator",
+        "Xcccc",
+        "\\textbf{Attacks} & \\textbf{HTER intra} & \\textbf{AUC intra} & "
+        "\\textbf{HTER cross} & \\textbf{AUC cross}",
+        rows,
+    )
+
+
 def ablation_table(runs: Runs) -> str:
     groups = [(data, corpus) for data in ("synthetic", "real") for corpus in CORPUS_NAMES]
     medians = {
@@ -960,6 +988,7 @@ def main() -> None:
         ("Original", {**real_only, ("msu", "mixed"): matched_one[("msu", "mixed")]}),
         *((f"Split {index}", find_runs(path)) for index, path in enumerate(args.msu_splits, 1)),
     ]
+    first_generator_runs = find_runs(args.first_generator_runs)
     first_generator = json.loads(args.first_generator_calibration.read_text())
     calibrated = {
         corpus: json.loads(path.read_text())
@@ -972,7 +1001,8 @@ def main() -> None:
         "tab-metrics.tex": metrics_table(clean),
         "tab-threshold.tex": threshold_table(clean),
         "tab-noise.tex": noise_table(clean, find_runs(args.noise_off), noise_on_real_crops),
-        "tab-ablation.tex": ablation_table(find_runs(args.first_generator_runs)),
+        "tab-first-generator.tex": first_generator_table(first_generator_runs),
+        "tab-ablation.tex": ablation_table(first_generator_runs),
         "tab-ablation-noise.tex": noise_ablation_table(clean, noise_on_real_crops),
         "tab-ratio.tex": ratio_table(noise_on_real_crops, by_ratio),
         "tab-generators.tex": generators_table(
