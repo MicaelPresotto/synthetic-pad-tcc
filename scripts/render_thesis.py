@@ -17,7 +17,7 @@ from synthetic_pad.evaluation.metrics import (
     bpcer_threshold,
     classification_metrics,
 )
-from synthetic_pad.frames import CropSample, load_partitions, select
+from synthetic_pad.frames import FRAMES_PER_VIDEO, CropSample, load_partitions, select
 
 CORPUS_NAMES = {"msu": "MSU-MFSD", "replay-mobile": "Replay-Mobile"}
 DIRECTIONS = (("msu", "replay-mobile"), ("replay-mobile", "msu"))
@@ -157,9 +157,10 @@ def composition_table(partitions: dict[str, list[CropSample]]) -> str:
         if corpus != list(partitions)[-1]:
             rows.append("\t\t\\midrule")
     return table(
-        "Face crops in each partition: the training set of each configuration, with as many "
-        "synthetic replay attacks as bona fide training crops, and the development and test "
-        "partitions, which hold the same real crops in every configuration. "
+        f"Number of face crops in each partition, {FRAMES_PER_VIDEO} per video: the training set "
+        "of each configuration, with as many synthetic replay attacks as bona fide training "
+        "crops, and the development and test partitions, which hold the same real crops in "
+        "every configuration. "
         "The last column is the share of the attacks that are synthetic (\\%).",
         "tab:composition",
         "Xcccccc",
