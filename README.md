@@ -112,6 +112,15 @@ possible. Parameters are tuned visually against a synthetic test chart or a real
 uv run python scripts/preview_moire.py --sweep saturation=0.8:1.6:5
 ```
 
+`--draws` shows the same bona fide image beside several attacks, each drawn with its own
+seed, so the fringe frequency and angle visibly change from one attack to the next. The
+example figure of the generator section in the thesis comes from it:
+
+```bash
+uv run python scripts/preview_moire.py --draws 3 --output monographs/fig-moire-chart.png
+uv run python scripts/preview_moire.py --input path/to/portrait.png --draws 3 --output monographs/fig-moire-portrait.png
+```
+
 The eye is not the final judge of a parameter. `calibrate_generator.py` measures, on the
 training partition of each corpus, how the real replay and print crops differ from the
 bona fide ones: saturation, contrast, black and white levels, sharpness, and the power
