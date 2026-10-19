@@ -17,6 +17,12 @@ FACE_CROP_SCALE = 1.4
 CORPORA = ("msu", "replay-mobile")
 MSU_DEVELOPMENT_SUBJECTS = 5
 MSU_SPLIT_SEED = 20260928
+FLAT_BLOCK_SIDE = 8
+FLAT_BLOCK_SPREAD = 0.5
+BLACK_CLIP_LEVEL = 5.0
+WHITE_CLIP_LEVEL = 250.0
+DAMAGE_DISTANCE_RATIO = 3.0
+DAMAGE_FLAT_EXCESS = 0.10
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +31,7 @@ class CropSample:
     partition: str
     subject: str
     species: str
+    video: str
 
     @property
     def is_attack(self) -> bool:
@@ -131,7 +138,11 @@ def load_crops(frames_directory: Path) -> list[CropSample]:
     manifest = json.loads((frames_directory / MANIFEST_NAME).read_text())
     return [
         CropSample(
-            frames_directory / row["image"], row["partition"], row["subject"], row["species"]
+            frames_directory / row["image"],
+            row["partition"],
+            row["subject"],
+            row["species"],
+            row["video"],
         )
         for row in manifest["frames"]
     ]
@@ -170,3 +181,31 @@ def select(samples: Sequence[CropSample], partition: str) -> list[CropSample]:
 
 def read_crops(samples: Sequence[CropSample]) -> np.ndarray:
     return np.stack([read_image(sample.image) for sample in samples])
+
+
+def flat_block_fraction(crop: RgbImage) -> float:
+    """Share of the square luminance blocks whose standard deviation, in grey levels, is below
+    FLAT_BLOCK_SPREAD, leaving out blocks an over- or underexposed capture clips to white or
+    black."""
+    luminance = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY).astype(np.float64)
+    rows, columns = luminance.shape[0] // FLAT_BLOCK_SIDE, luminance.shape[1] // FLAT_BLOCK_SIDE
+    blocks = luminance[: rows * FLAT_BLOCK_SIDE, : columns * FLAT_BLOCK_SIDE].reshape(
+        rows, FLAT_BLOCK_SIDE, columns, FLAT_BLOCK_SIDE
+    )
+    level = blocks.mean(axis=(1, 3))
+    unclipped = (level > BLACK_CLIP_LEVEL) & (level < WHITE_CLIP_LEVEL)
+    return float(((blocks.std(axis=(1, 3)) < FLAT_BLOCK_SPREAD) & unclipped).mean())
+
+
+def damage_measures(crops: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Per crop of one video: its distance to the median crop over the typical distance, and
+    its share of flat blocks above the typical share."""
+    frames = crops.astype(np.float64)
+    distances = np.abs(frames - np.median(frames, axis=0)).mean(axis=(1, 2, 3))
+    flatness = np.array([flat_block_fraction(crop) for crop in crops])
+    return distances / np.median(distances), flatness - np.median(flatness)
+
+
+def is_damaged(distance_ratio: np.ndarray, flat_excess: np.ndarray) -> np.ndarray:
+    """Far from the median crop and flatter than it; motion alone only does the first."""
+    return (distance_ratio > DAMAGE_DISTANCE_RATIO) & (flat_excess > DAMAGE_FLAT_EXCESS)

@@ -270,7 +270,8 @@ synthetic-per-bona-fide ratios (`results/fraction-0.1`, `-0.25`, `-0.5`, `result
 (`results/matched-noise-fraction-1`, `results/matched-noise-copies-3`,
 `results/screen-best-fraction-1`, `results/screen-best-copies-3`), the first-generator runs of
 `results/judges` and the calibration reports, and writes the `.tex` tables and `.pdf`
-figures into `monographs/`. `ablate_generator.py` writes the `ablation.json` behind the
+figures into `monographs/`. The composition table counts the face crops of each
+partition in `data/frames`, so the crops of `extract_frames.py` must be in place. `ablate_generator.py` writes the `ablation.json` behind the
 stage tables, run on every synthetic judge of `results/clean` and
 `results/noise-real-crops`: the median score a trained judge gives to attacks rendered with each
 stage of the generator switched on or off.
@@ -309,6 +310,21 @@ Each run samples evenly spaced frames from every video, cuts a square crop centr
 the face and writes it losslessly as PNG, so that no compression artifact is mistaken
 for a recapture cue. A `manifest.json` next to the crops records the settings and the
 partition, subject, species, video and frame behind every crop.
+
+Six MSU-MFSD videos have damaged ProRes frames, and two hold fewer frames than their
+headers declare, so frames are sampled among those that actually decode.
+`check_crops.py` confirms that no damaged frame slipped through. A crop counts as
+damaged when it is both far from the median crop of its video, more than three times
+the typical distance, and flatter than it, with a tenth more of its 8×8 luminance
+blocks uniform. Motion moves a crop away from the median without flattening it, so a
+hand-held attack does not trip the check. Blocks clipped to pure black or white do not
+count as flat: some tablet videos of Replay-Mobile hold overexposed frames, often the
+first one, which are real captures and are kept. A fault that adds noise rather than flat blocks would
+pass the check unnoticed.
+
+```bash
+uv run python scripts/check_crops.py
+```
 
 > **Note:** dataset files are not distributed in this repository. They are subject to their original licenses and must be obtained from their respective providers.
 
