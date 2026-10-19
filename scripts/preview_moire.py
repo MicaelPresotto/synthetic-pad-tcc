@@ -139,7 +139,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="working resolution in pixels; --input is cropped and resized to it "
         f"(default: {WORKING_RESOLUTION})",
     )
-    parser.add_argument("--sweep", help="walk one field: FIELD=START:STOP:STEPS")
+    shown = parser.add_mutually_exclusive_group()
+    shown.add_argument("--sweep", help="walk one field: FIELD=START:STOP:STEPS")
+    shown.add_argument(
+        "--draws", type=int, help="random draws of the attack beside the bona fide, one per seed"
+    )
     parser.add_argument("--columns", type=int, default=3, help="panels per row in sweep mode")
 
     tuning = parser.add_argument_group("MoireConfig overrides")
@@ -183,6 +187,14 @@ def main() -> None:
         columns = max(1, min(args.columns, len(panels)))
         sheet = contact_sheet(panels, columns)
         summary = f"sweep {field_name}: {values[0]:g} -> {values[-1]:g} over {len(values)} steps"
+    elif args.draws:
+        panels = [label_panel(source, f"bona fide  ({origin})")]
+        for draw in range(1, args.draws + 1):
+            config = dataclasses.replace(base_config, seed=base_config.seed + draw)
+            attack = MoireRecaptureGenerator(config).generate(source)
+            panels.append(label_panel(attack, f"draw {draw}"))
+        sheet = contact_sheet(panels, columns=len(panels))
+        summary = f"{args.draws} random draws"
     else:
         attack = MoireRecaptureGenerator(base_config).generate(source)
         sheet = contact_sheet(
