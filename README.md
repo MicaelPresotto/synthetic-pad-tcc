@@ -310,6 +310,21 @@ the face and writes it losslessly as PNG, so that no compression artifact is mis
 for a recapture cue. A `manifest.json` next to the crops records the settings and the
 partition, subject, species, video and frame behind every crop.
 
+Six MSU-MFSD videos have damaged ProRes frames, and two hold fewer frames than their
+headers declare, so frames are sampled among those that actually decode.
+`check_crops.py` confirms that no damaged frame slipped through. A crop counts as
+damaged when it is both far from the median crop of its video, more than three times
+the typical distance, and flatter than it, with a tenth more of its 8×8 luminance
+blocks uniform. Motion moves a crop away from the median without flattening it, so a
+hand-held attack does not trip the check. Blocks clipped to pure black or white do not
+count as flat: some tablet videos of Replay-Mobile hold overexposed frames, often the
+first one, which are real captures and are kept. A fault that adds noise rather than flat blocks would
+pass the check unnoticed.
+
+```bash
+uv run python scripts/check_crops.py
+```
+
 > **Note:** dataset files are not distributed in this repository. They are subject to their original licenses and must be obtained from their respective providers.
 
 ## Repository structure
