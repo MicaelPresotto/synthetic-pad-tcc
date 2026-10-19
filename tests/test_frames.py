@@ -5,11 +5,16 @@ import numpy as np
 import pytest
 
 from synthetic_pad.corpora import BONA_FIDE, REPLAY, Recording
+from synthetic_pad.domain import RgbImage
 from synthetic_pad.frames import (
+    DAMAGE_DISTANCE_RATIO,
     CropSample,
+    damage_measures,
     evenly_spaced,
     extract_corpus,
+    flat_block_fraction,
     hold_out_subjects,
+    is_damaged,
     load_crops,
     readable_frame_count,
     sample_face_crops,
@@ -129,7 +134,9 @@ class TestExtractCorpus:
 
 def samples_for(subjects: range, partition: str = "train") -> list[CropSample]:
     return [
-        CropSample(Path(f"{subject}_{frame}.png"), partition, f"{subject:03d}", BONA_FIDE)
+        CropSample(
+            Path(f"{subject}_{frame}.png"), partition, f"{subject:03d}", BONA_FIDE, f"{subject}"
+        )
         for subject in subjects
         for frame in range(3)
     ]
@@ -172,3 +179,35 @@ class TestHoldOutSubjects:
     def test_refuses_to_empty_the_partition(self) -> None:
         with pytest.raises(ValueError, match="cannot hold out"):
             hold_out_subjects(samples_for(range(3)), "train", "devel", count=3, seed=1)
+
+
+def noisy_copies(image: RgbImage, count: int) -> np.ndarray:
+    rng = np.random.default_rng(7)
+    noisy = image[None].astype(np.float64) + rng.normal(0.0, 2.0, (count, *image.shape))
+    return np.clip(noisy, 0, 255).astype(np.uint8)
+
+
+class TestDamagedCrops:
+    def test_a_uniform_crop_is_all_flat(self) -> None:
+        assert flat_block_fraction(np.full((64, 64, 3), 90, dtype=np.uint8)) == 1.0
+
+    @pytest.mark.parametrize("clipped", [0, 255])
+    def test_a_crop_clipped_to_black_or_white_is_not_flat(self, clipped: int) -> None:
+        assert flat_block_fraction(np.full((64, 64, 3), clipped, dtype=np.uint8)) == 0.0
+
+    def test_motion_is_not_damage(self, face_like_image: RgbImage) -> None:
+        crops = noisy_copies(face_like_image, 10)
+        crops[4] = np.roll(crops[4], 40, axis=1)
+        distance_ratio, flat_excess = damage_measures(crops)
+        assert distance_ratio[4] > DAMAGE_DISTANCE_RATIO
+        assert not is_damaged(distance_ratio, flat_excess).any()
+
+    def test_an_overexposed_crop_is_not_damage(self, face_like_image: RgbImage) -> None:
+        crops = noisy_copies(face_like_image, 10)
+        crops[4, :96, :96] = 255
+        assert not is_damaged(*damage_measures(crops)).any()
+
+    def test_a_flat_block_is_damage(self, face_like_image: RgbImage) -> None:
+        crops = noisy_copies(face_like_image, 10)
+        crops[4, :96, :96] = 128
+        assert is_damaged(*damage_measures(crops)).tolist() == [index == 4 for index in range(10)]

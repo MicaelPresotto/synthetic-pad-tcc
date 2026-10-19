@@ -1,6 +1,6 @@
 import argparse
 import json
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -9,7 +9,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.ticker import NullFormatter
 
-from synthetic_pad.corpora import BONA_FIDE
+from synthetic_pad.corpora import BONA_FIDE, PRINT, REPLAY
 from synthetic_pad.evaluation.metrics import (
     acer,
     apcer,
@@ -17,6 +17,7 @@ from synthetic_pad.evaluation.metrics import (
     bpcer_threshold,
     classification_metrics,
 )
+from synthetic_pad.frames import FRAMES_PER_VIDEO, CropSample, load_partitions, select
 
 CORPUS_NAMES = {"msu": "MSU-MFSD", "replay-mobile": "Replay-Mobile"}
 DIRECTIONS = (("msu", "replay-mobile"), ("replay-mobile", "msu"))
@@ -39,6 +40,8 @@ SOURCE_LINE = r"{\footnotesize Source: prepared by the author (2026).}"
 NOT_RUN = "--"
 COLUMN_GAP_PT = 4
 MSU_SPLIT_DRAWS = 8
+SYNTHETIC_PER_BONA_FIDE = 1
+PARTITION_NAMES = {"train": "Training", "devel": "Development", "test": "Test"}
 CENTRED_X = ">{\\centering\\arraybackslash}X"
 
 type Report = dict[str, Any]
@@ -111,6 +114,59 @@ def table(caption: str, label: str, columns: str, header: str, rows: Sequence[st
         f"\t{SOURCE_LINE}\n"
         "\\end{minipage}\n"
         "\\end{center}\n"
+    )
+
+
+def thousands(count: int) -> str:
+    return f"{count:,}".replace(",", "{,}")
+
+
+def composition_rows(
+    samples: Sequence[CropSample], partition: str
+) -> list[tuple[str, tuple[int, int, int, int]]]:
+    """Bona fide, print, replay and synthetic crops per set; synthetic ones enter training only."""
+    species = Counter(sample.species for sample in select(samples, partition))
+    bona_fide, printed, replayed = species[BONA_FIDE], species[PRINT], species[REPLAY]
+    name = PARTITION_NAMES[partition]
+    if partition != "train":
+        return [(name, (bona_fide, printed, replayed, 0))]
+    synthetic = SYNTHETIC_PER_BONA_FIDE * bona_fide
+    return [
+        (f"{name}, real", (bona_fide, printed, replayed, 0)),
+        (f"{name}, synthetic", (bona_fide, 0, 0, synthetic)),
+        (f"{name}, mixed", (bona_fide, printed, replayed, synthetic)),
+    ]
+
+
+def composition_table(partitions: dict[str, list[CropSample]]) -> str:
+    rows = []
+    for corpus, samples in partitions.items():
+        rows.append(f"\t\t\\multicolumn{{7}}{{l}}{{\\textit{{{CORPUS_NAMES[corpus]}}}}} \\\\")
+        for partition in PARTITION_NAMES:
+            for label, (bona_fide, printed, replayed, synthetic) in composition_rows(
+                samples, partition
+            ):
+                attacks = printed + replayed + synthetic
+                cells = [
+                    label,
+                    *(thousands(count) for count in (bona_fide, printed, replayed, synthetic)),
+                    thousands(bona_fide + attacks),
+                    f"{100 * synthetic / attacks:.0f}",
+                ]
+                rows.append("\t\t" + " & ".join(cells) + " \\\\")
+        if corpus != list(partitions)[-1]:
+            rows.append("\t\t\\midrule")
+    return table(
+        f"Number of face crops in each partition, {FRAMES_PER_VIDEO} per video: the training set "
+        "of each configuration, with as many synthetic replay attacks as bona fide training "
+        "crops, and the development and test partitions, which hold the same real crops in "
+        "every configuration. "
+        "The last column is the share of the attacks that are synthetic (\\%).",
+        "tab:composition",
+        "Xcccccc",
+        "\\textbf{Set} & \\textbf{Bona fide} & \\textbf{Print} & \\textbf{Replay} & "
+        "\\textbf{Synthetic} & \\textbf{Total} & \\textbf{Synthetic (\\%)}",
+        rows,
     )
 
 
@@ -861,8 +917,10 @@ def print_spectrum_fit(calibrated: dict[str, dict[str, Any]]) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Render every table and figure of the thesis results from results/."
+        description="Render every table and figure of the thesis results from results/, and the "
+        "composition of each partition from the face crops in data/frames."
     )
+    parser.add_argument("--frames", type=Path, default=Path("data/frames"))
     parser.add_argument("--clean", type=Path, default=Path("results/clean"))
     parser.add_argument("--noise-off", type=Path, default=Path("results/no-noise"))
     parser.add_argument(
@@ -967,6 +1025,7 @@ def main() -> None:
     }
     args.output.mkdir(parents=True, exist_ok=True)
     outputs = {
+        "tab-composition.tex": composition_table(load_partitions(args.frames)),
         "tab-baseline.tex": baseline_table(clean),
         "tab-main.tex": main_table(clean),
         "tab-metrics.tex": metrics_table(clean),
