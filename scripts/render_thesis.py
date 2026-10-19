@@ -878,7 +878,7 @@ def spectrum_figure(
         axis.set_xlabel("Spatial frequency (cycles per width)", fontsize=8, color=INK)
         axis.set_title(CORPUS_NAMES[corpus], fontsize=9, color=INK)
         style(axis)
-    axes[0].set_ylabel("Colour power / bona fide", fontsize=8, color=INK)
+    axes[0].set_ylabel("Color power / bona fide", fontsize=8, color=INK)
     axes[0].set_yticks(SPECTRUM_TICKS, [f"{tick:g}" for tick in SPECTRUM_TICKS])
     axes[0].yaxis.set_minor_formatter(NullFormatter())
     handles, labels = axes[0].get_legend_handles_labels()
