@@ -61,6 +61,14 @@ def square_face_crop(frame: RgbImage, box: FaceBox, scale: float) -> RgbImage:
     return np.ascontiguousarray(frame[top : top + side, left : left + side])
 
 
+def face_cells(grid: int, scale: float) -> np.ndarray:
+    """Cells of a grid laid over a square crop whose centre falls inside its face box, the
+    central square that square_face_crop leaves at 1 / scale of the crop side."""
+    centres = (np.arange(grid) + 0.5) / grid
+    inside = np.abs(centres - 0.5) <= 0.5 / scale
+    return np.asarray(inside[:, None] & inside[None, :])
+
+
 def evenly_spaced(indices: Sequence[int], count: int) -> list[int]:
     if count >= len(indices):
         return list(indices)

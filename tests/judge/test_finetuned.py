@@ -10,6 +10,7 @@ from synthetic_pad.judge.finetuned import (
     FineTunedDetector,
     TrainingConfig,
     build_model,
+    depth_loss,
     mix_styles,
     train_detector,
 )
@@ -43,6 +44,10 @@ class TestTrainingConfig:
     def test_rejects_mixstyle_on_a_vision_transformer(self) -> None:
         with pytest.raises(ValueError, match="MixStyle"):
             TrainingConfig(architecture="vit_b_16", mixstyle=True)
+
+    def test_rejects_depth_supervision_on_a_vision_transformer(self) -> None:
+        with pytest.raises(ValueError, match="depth map"):
+            TrainingConfig(architecture="vit_b_16", depth_supervision=True)
 
 
 class TestTrainDetector:
@@ -173,3 +178,71 @@ class TestVisionTransformer:
     ) -> None:
         with pytest.raises(ValueError, match="no convolutional stage"):
             vision_transformer.grad_cam(separable_set(count=1, size=224)[0])
+
+
+DEPTH = replace(TINY, depth_supervision=True)
+DEPTH_SIDE = 64
+
+
+def relief_targets(is_attack: np.ndarray) -> np.ndarray:
+    """A raised map for every bona fide image and a flat one for every attack, on the 2 x 2
+    grid that a 64 px image leaves at the last stage."""
+    return np.where(is_attack[:, None, None], 0.0, 1.0).repeat(2, 1).repeat(2, 2).astype(np.float32)
+
+
+@pytest.fixture(scope="module")
+def depth_trained() -> FineTunedDetector:
+    images, is_attack = separable_set(size=DEPTH_SIDE)
+    return train_detector(images, is_attack, DEPTH, "cpu", relief_targets(is_attack))[0]
+
+
+class TestDepthSupervision:
+    def test_draws_one_depth_logit_per_cell_of_the_last_stage(self) -> None:
+        model = build_model("resnet18", pretrained=False, depth_supervision=True)
+        images = separable_set(count=3, size=DEPTH_SIDE)[0]
+        assert FineTunedDetector(model, "resnet18", "cpu", True).score_batch(images).shape == (3,)
+        with torch.no_grad():
+            assert model(torch.zeros(3, 3, DEPTH_SIDE, DEPTH_SIDE)).shape == (3, 4)
+
+    def test_learns_to_separate_an_easy_set(self, depth_trained: FineTunedDetector) -> None:
+        images, is_attack = separable_set(size=DEPTH_SIDE)
+        scores = depth_trained.score_batch(images)
+        assert auc(scores[is_attack], scores[~is_attack]) > 0.9
+        assert scores.min() >= 0.0
+        assert scores.max() <= 1.0
+
+    def test_scores_the_same_after_saving_and_loading(
+        self, depth_trained: FineTunedDetector, tmp_path: Path
+    ) -> None:
+        images = separable_set(size=DEPTH_SIDE)[0]
+        depth_trained.save(tmp_path / "judge.pt")
+        reloaded = FineTunedDetector.load(tmp_path / "judge.pt", device="cpu")
+        np.testing.assert_allclose(reloaded.score_batch(images), depth_trained.score_batch(images))
+
+    def test_has_no_attack_logit_for_grad_cam(self, depth_trained: FineTunedDetector) -> None:
+        with pytest.raises(ValueError, match="Grad-CAM"):
+            depth_trained.grad_cam(separable_set(count=1, size=DEPTH_SIDE)[0])
+
+    def test_needs_depth_targets(self) -> None:
+        images, is_attack = separable_set(size=DEPTH_SIDE)
+        with pytest.raises(ValueError, match="depth targets"):
+            train_detector(images, is_attack, DEPTH, "cpu")
+
+    def test_refuses_depth_targets_without_it(self) -> None:
+        images, is_attack = separable_set(size=DEPTH_SIDE)
+        with pytest.raises(ValueError, match="depth targets"):
+            train_detector(images, is_attack, TINY, "cpu", relief_targets(is_attack))
+
+
+class TestDepthLoss:
+    def test_is_zero_for_a_perfect_map(self) -> None:
+        logits = torch.tensor([[20.0, 20.0], [-20.0, -20.0]])
+        targets = torch.tensor([[1.0, 1.0], [0.0, 0.0]])
+        assert float(depth_loss(logits, targets, torch.tensor([0.0, 1.0]), 3.0)) < 1e-6
+
+    def test_weighs_an_attack_by_the_attack_weight(self) -> None:
+        logits = torch.zeros(2, 1)
+        targets = torch.ones(2, 1)
+        bona_fide_only = depth_loss(logits, targets, torch.tensor([0.0, 0.0]), 3.0)
+        one_attack = depth_loss(logits, targets, torch.tensor([0.0, 1.0]), 3.0)
+        assert float(one_attack) == pytest.approx(2.0 * float(bona_fide_only))
