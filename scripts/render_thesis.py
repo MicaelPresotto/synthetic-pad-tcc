@@ -40,6 +40,10 @@ SOURCE_LINE = r"{\footnotesize Source: prepared by the author (2026).}"
 NOT_RUN = "--"
 COLUMN_GAP_PT = 4
 MSU_SPLIT_DRAWS = 8
+SCORE_EPSILON = 1e-7
+LOG_ODDS_BIN_WIDTH = 0.5
+BAND_OPACITY = 0.15
+HISTOGRAM_OPACITY = 0.6
 SYNTHETIC_PER_BONA_FIDE = 1
 PARTITION_NAMES = {"train": "Training", "devel": "Development", "test": "Test"}
 CENTRED_X = ">{\\centering\\arraybackslash}X"
@@ -737,44 +741,6 @@ def runs_by_ratio(folders: Sequence[Path]) -> dict[float, Runs]:
     return dict(sorted(by_ratio.items()))
 
 
-def ratio_table(real: Runs, by_ratio: dict[float, Runs]) -> str:
-    measures: tuple[tuple[str, Callable[[dict[int, Path]], str]], ...] = (
-        ("Replay AUC", lambda runs: f"{measured(runs, cross_auc('replay')).mean():.3f}"),
-        ("HTER (\\%)", lambda runs: percent_mean(runs, hter_of("cross"))),
-    )
-    rows = []
-    for source, target in DIRECTIONS:
-        rows.append(direction_heading(source, target, len(by_ratio) + 3))
-        for index, (data, (title, value_of)) in enumerate(
-            (data, measure) for data in ("synthetic", "mixed") for measure in measures
-        ):
-            cells = [
-                data.capitalize() if index % len(measures) == 0 else "",
-                title,
-                value_of(real[(source, "real")]),
-                *(value_of(runs[(source, data)]) for runs in by_ratio.values()),
-            ]
-            rows.append("\t\t" + " & ".join(cells) + " \\\\")
-        if source != DIRECTIONS[-1][0]:
-            rows.append("\t\t\\midrule")
-    columns = len(by_ratio)
-    ratios = " & ".join(f"\\textbf{{{ratio:g}}}" for ratio in by_ratio)
-    return table(
-        "Cross-dataset replay AUC and HTER (\\%) against the number of synthetic attacks rendered "
-        "per bona fide training crop, with the noise of the generator on every real training crop "
-        "as well; the real column trains on the real attacks alone. The loss weighs both classes "
-        "equally, so in the synthetic configuration the ratio changes how many distinct attacks "
-        "the detector sees, not their total weight. Mean over ten seeds.",
-        "tab:ratio",
-        "ll" + CENTRED_X * (columns + 1),
-        f"& & & \\multicolumn{{{columns}}}{{c}}{{\\textbf{{Synthetic per bona fide}}}} \\\\\n"
-        f"\t\t\\cmidrule(lr){{4-{columns + 3}}}\n"
-        "\t\t\\textbf{Attacks} & \\textbf{Measure} & "
-        f"\\textbf{{Real}} & {ratios}",
-        rows,
-    )
-
-
 def relative_statistics(section: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Ratios of each group to the bona fide crops. Reports written before the calibration
     search, such as the first generator's, nest them under a single key."""
@@ -832,6 +798,128 @@ def seeds_figure(runs: Runs, path: Path) -> None:
         style(axis)
     axes[0].set_ylabel("Cross-dataset HTER (%)", fontsize=8, color=INK)
     figure.savefig(path)
+
+
+def log_odds(scores: np.ndarray) -> np.ndarray:
+    clipped = np.clip(scores, SCORE_EPSILON, 1.0 - SCORE_EPSILON)
+    return np.asarray(np.log(clipped / (1.0 - clipped)))
+
+
+def representative_seed(runs: dict[int, Path]) -> int:
+    """The seed whose cross-dataset HTER is nearest the mean over all seeds."""
+    hters = {seed: hter_of("cross")(report(run)) for seed, run in runs.items()}
+    mean = float(np.mean(list(hters.values())))
+    return min(hters, key=lambda seed: abs(hters[seed] - mean))
+
+
+def threshold_shift_figure(runs: Runs, path: Path) -> int:
+    """Score histograms, in log-odds, of the real detector trained on MSU-MFSD on its own test
+    partition and on that of Replay-Mobile, with the one threshold its development partition
+    fixed. Returns the seed drawn."""
+    source, target = DIRECTIONS[0]
+    seed = representative_seed(runs[(source, "real")])
+    run = runs[(source, "real")][seed]
+    scenarios = (("intra", source), ("cross", target))
+    groups = {scenario: partition_scores(run, scenario)[:2] for scenario, _ in scenarios}
+    every_score = log_odds(np.concatenate([s for pair in groups.values() for s in pair]))
+    edges = np.arange(
+        np.floor(every_score.min()),
+        np.ceil(every_score.max()) + LOG_ODDS_BIN_WIDTH,
+        LOG_ODDS_BIN_WIDTH,
+    )
+    figure = Figure(figsize=(FIGURE_WIDTH_IN, FIGURE_HEIGHT_IN), layout="constrained")
+    axes = figure.subplots(1, 2, sharex=True, sharey=True)
+    for axis, (scenario, corpus) in zip(axes, scenarios, strict=True):
+        attacks, bona_fide = groups[scenario]
+        for colour, title, scores in (
+            (SERIES_COLOURS[0], "Bona fide", bona_fide),
+            (SERIES_COLOURS[1], "Attacks", attacks),
+        ):
+            axis.hist(
+                log_odds(scores),
+                bins=edges,
+                weights=np.full(scores.size, 1.0 / scores.size),
+                color=colour,
+                alpha=HISTOGRAM_OPACITY,
+                label=title,
+            )
+        threshold = log_odds(np.array(report(run)[scenario]["threshold"]))
+        axis.axvline(float(threshold), color=INK, linestyle="--", linewidth=1, label="Threshold")
+        axis.set_title(f"{CORPUS_NAMES[corpus]} test partition", fontsize=9, color=INK)
+        axis.set_xlabel("Attack score (log-odds)", fontsize=8, color=INK)
+        style(axis)
+    axes[0].set_ylabel("Share of crops", fontsize=8, color=INK)
+    axes[0].legend(fontsize=7, frameon=False)
+    figure.savefig(path)
+    return seed
+
+
+def ratio_curves(
+    real: Runs, by_ratio: dict[float, Runs]
+) -> dict[tuple[str, str, str], tuple[np.ndarray, np.ndarray]]:
+    """Mean and standard deviation over the seeds, at each synthetic-per-bona-fide ratio, of
+    the cross-dataset replay AUC and HTER (%), by source corpus, measure and training data,
+    the real detector repeated at every ratio."""
+    measures = (("Replay AUC", cross_auc("replay"), 1.0), ("HTER (%)", hter_of("cross"), 100.0))
+    curves = {}
+    for source, _ in DIRECTIONS:
+        for title, pick, scale in measures:
+            for data in ("real", "synthetic", "mixed"):
+                values = np.array(
+                    [
+                        scale * measured((real if data == "real" else runs)[(source, data)], pick)
+                        for runs in by_ratio.values()
+                    ]
+                )
+                curves[(source, title, data)] = (values.mean(axis=1), values.std(axis=1))
+    return curves
+
+
+def ratio_figure(
+    curves: dict[tuple[str, str, str], tuple[np.ndarray, np.ndarray]],
+    ratios: Sequence[float],
+    path: Path,
+) -> None:
+    titles = list(dict.fromkeys(title for _, title, _ in curves))
+    figure = Figure(figsize=(FIGURE_WIDTH_IN, 2 * FIGURE_HEIGHT_IN), layout="constrained")
+    axes = figure.subplots(len(titles), len(DIRECTIONS), sharex=True, sharey="row")
+    for row, title in enumerate(titles):
+        for column, (source, target) in enumerate(DIRECTIONS):
+            axis = axes[row, column]
+            real_mean, _ = curves[(source, title, "real")]
+            axis.axhline(float(real_mean[0]), color=INK, linestyle="--", linewidth=1, label="Real")
+            for colour, data in zip(SERIES_COLOURS, ("synthetic", "mixed"), strict=False):
+                mean, std = curves[(source, title, data)]
+                axis.plot(
+                    ratios, mean, marker="o", markersize=3, color=colour, label=data.capitalize()
+                )
+                axis.fill_between(
+                    ratios, mean - std, mean + std, color=colour, alpha=BAND_OPACITY, linewidth=0
+                )
+            axis.set_xscale("log")
+            axis.set_xticks(list(ratios), [f"{ratio:g}" for ratio in ratios])
+            axis.xaxis.set_minor_formatter(NullFormatter())
+            if row == 0:
+                axis.set_title(
+                    f"{CORPUS_NAMES[source]} → {CORPUS_NAMES[target]}", fontsize=9, color=INK
+                )
+            if row == len(titles) - 1:
+                axis.set_xlabel("Synthetic attacks per bona fide crop", fontsize=8, color=INK)
+            style(axis)
+        axes[row, 0].set_ylabel(title, fontsize=8, color=INK)
+    axes[0, 0].legend(fontsize=7, frameon=False)
+    figure.savefig(path)
+
+
+def print_ratio_curves(
+    curves: dict[tuple[str, str, str], tuple[np.ndarray, np.ndarray]], ratios: Sequence[float]
+) -> None:
+    """The values behind fig-ratio, which the text quotes."""
+    print("\n== fig-ratio: mean and standard deviation over the seeds")
+    print("  ratios " + "  ".join(f"{ratio:g}" for ratio in ratios))
+    for (source, title, data), (mean, std) in curves.items():
+        cells = "  ".join(f"{m:.3f}±{s:.3f}" for m, s in zip(mean, std, strict=True))
+        print(f"  {CORPUS_NAMES[source]:13s} {title:10s} {data:9s} {cells}")
 
 
 def spectrum_profiles(
@@ -1063,7 +1151,6 @@ def main() -> None:
         "tab-first-generator.tex": first_generator_table(first_generator_runs),
         "tab-ablation.tex": ablation_table(first_generator_runs),
         "tab-ablation-noise.tex": noise_ablation_table(clean, noise_on_real_crops),
-        "tab-ratio.tex": ratio_table(noise_on_real_crops, by_ratio),
         "tab-generators.tex": generators_table(
             clean,
             (
@@ -1092,7 +1179,14 @@ def main() -> None:
         (args.output / name).write_text(content)
     seeds_figure(clean, args.output / "fig-seeds-hter.pdf")
     spectrum_figure(first_generator, calibrated, args.output / "fig-colour-spectrum.pdf")
-    print(f"wrote {', '.join(outputs)}, fig-seeds-hter.pdf and fig-colour-spectrum.pdf")
+    shift_seed = threshold_shift_figure(clean, args.output / "fig-threshold-shift.pdf")
+    curves = ratio_curves(noise_on_real_crops, by_ratio)
+    ratio_figure(curves, list(by_ratio), args.output / "fig-ratio.pdf")
+    print(
+        f"wrote {', '.join(outputs)}, fig-seeds-hter.pdf, fig-colour-spectrum.pdf, "
+        f"fig-threshold-shift.pdf (seed {shift_seed}) and fig-ratio.pdf"
+    )
+    print_ratio_curves(curves, list(by_ratio))
     print_paired_differences("noise stage on, as in tab-main", clean)
     print_paired_differences("noise stage off", noise_off)
     print_paired_differences("noise on every real training crop", noise_on_real_crops)
