@@ -234,6 +234,23 @@ not free of real attack data, though nothing of the target corpus reaches them.
 f of the bona fide training crops, drawn with the training seed, so the judge sees fewer
 synthetic attacks than bona fide. f = 1 reproduces the single-copy runs exactly.
 
+`--depth-maps DIR` supervises the judge with a depth map instead of one label per crop, after
+Liu et al. (2018): a live face has relief, a screen or a print is flat. The pooling and the
+classifier of the ResNet give way to a 1 × 1 convolution that draws a 7 × 7 map at its last
+stage. The target of a bona fide crop is its pseudo-depth, rescaled to [0, 1] inside the face
+box and zero outside it; the target of every attack, real or synthetic, is flat. The score is
+one minus the mean of the predicted map, so the threshold and the metrics apply unchanged;
+Grad-CAM, which needs an attack logit, does not. `estimate_depth.py` writes the targets once,
+for every bona fide crop of both corpora, with Depth Anything V2 Small at a pinned revision,
+run locally: nothing of the corpora leaves the machine.
+
+```bash
+uv run python scripts/estimate_depth.py
+uv run python scripts/train_judge.py --train-corpus msu --data mixed --depth-maps data/depth \
+  --generator-config experiments/moire-fitted-to-msu-matched-noise.json --seed 1 \
+  --output results/depth/msu-mixed-seed1
+```
+
 `explain_judge.py` shows where a trained judge looks. It computes Grad-CAM of the
 attack logit over the test crops of both corpora, split by species, together with one
 synthetic replay rendered from each bona fide test crop. It writes `attention.json`
@@ -354,6 +371,7 @@ synthetic-pad/
 │   ├── evaluation/    # metrics (APCER, BPCER, ACER, EER, HTER, AUC) and the per-species report
 │   ├── dataset.py     # image I/O and batch attack generation
 │   ├── calibration.py # image statistics that match generated attacks to real ones
+│   ├── depth.py       # pseudo-depth target maps of a depth-supervised judge
 │   ├── corpora.py     # MSU-MFSD and Replay-Mobile readers: partitions, attack species, face boxes
 │   └── frames.py      # face crops sampled from the corpus videos, and their partitions
 ├── scripts/           # command line tools: tuning, generation, training, the thesis assets

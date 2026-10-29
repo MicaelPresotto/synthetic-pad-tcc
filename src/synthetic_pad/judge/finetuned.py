@@ -18,6 +18,7 @@ type Batch = np.ndarray[Any, np.dtype[np.uint8]]
 type Labels = np.ndarray[Any, np.dtype[np.bool_]]
 type Scores = np.ndarray[Any, np.dtype[np.float64]]
 type AttentionMaps = np.ndarray[Any, np.dtype[np.float64]]
+type DepthMaps = np.ndarray[Any, np.dtype[np.float32]]
 
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
@@ -74,6 +75,7 @@ class TrainingConfig:
     learning_rate: float = 1e-4
     weight_decay: float = 1e-4
     mixstyle: bool = False
+    depth_supervision: bool = False
     seed: int = 20260928
 
     def __post_init__(self) -> None:
@@ -81,6 +83,8 @@ class TrainingConfig:
             raise ValueError(f"architecture must be one of {sorted(ARCHITECTURES)}")
         if self.mixstyle and not ARCHITECTURES[self.architecture].mixstyle_stages:
             raise ValueError(f"{self.architecture} has no convolutional stages for MixStyle")
+        if self.depth_supervision and ARCHITECTURES[self.architecture].grad_cam_stage is None:
+            raise ValueError(f"{self.architecture} has no convolutional stage to draw a depth map")
         require_positive(
             epochs=self.epochs, batch_size=self.batch_size, learning_rate=self.learning_rate
         )
@@ -89,23 +93,32 @@ class TrainingConfig:
 class FineTunedDetector(LivenessDetector):
     name = "finetuned"
 
-    def __init__(self, model: nn.Module, architecture: str, device: str) -> None:
+    def __init__(
+        self, model: nn.Module, architecture: str, device: str, depth_supervision: bool = False
+    ) -> None:
         self._model = model.to(device).eval()
         self._architecture = architecture
         self._device = device
+        self._depth_supervision = depth_supervision
 
     def score(self, image: RgbImage) -> float:
         ensure_rgb_uint8(image)
         return float(self.score_batch(image[None])[0])
 
     def score_batch(self, images: Batch) -> Scores:
+        """With depth supervision, the score is one minus the mean of the predicted depth map,
+        so a flat map scores as an attack."""
         scores = []
         with torch.no_grad():
             for start in range(0, len(images), SCORING_BATCH):
                 logits = self._model(
                     _to_tensor(images[start : start + SCORING_BATCH], self._device)
                 )
-                scores.append(torch.sigmoid(logits.squeeze(1)).cpu().numpy())
+                if self._depth_supervision:
+                    batch_scores = 1.0 - torch.sigmoid(logits).mean(dim=1)
+                else:
+                    batch_scores = torch.sigmoid(logits.squeeze(1))
+                scores.append(batch_scores.cpu().numpy())
         return np.concatenate(scores).astype(np.float64)
 
     def grad_cam(self, images: Batch) -> AttentionMaps:
@@ -113,6 +126,8 @@ class FineTunedDetector(LivenessDetector):
 
         One non-negative map per image, at that stage's resolution: 7 x 7 for a 224 px crop.
         """
+        if self._depth_supervision:
+            raise ValueError("a depth-supervised detector has no attack logit for Grad-CAM")
         stage_name = ARCHITECTURES[self._architecture].grad_cam_stage
         if stage_name is None:
             raise ValueError(f"{self._architecture} has no convolutional stage for Grad-CAM")
@@ -136,17 +151,29 @@ class FineTunedDetector(LivenessDetector):
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({"architecture": self._architecture, "state": self._model.state_dict()}, path)
+        torch.save(
+            {
+                "architecture": self._architecture,
+                "depth_supervision": self._depth_supervision,
+                "state": self._model.state_dict(),
+            },
+            path,
+        )
 
     @classmethod
     def load(cls, path: Path, device: str) -> "FineTunedDetector":
         saved = torch.load(path, map_location=device, weights_only=True)
-        model = build_model(saved["architecture"], pretrained=False)
+        depth_supervision = saved.get("depth_supervision", False)
+        model = build_model(
+            saved["architecture"], pretrained=False, depth_supervision=depth_supervision
+        )
         model.load_state_dict(saved["state"])
-        return cls(model, saved["architecture"], device)
+        return cls(model, saved["architecture"], device, depth_supervision)
 
 
-def build_model(architecture: str, pretrained: bool) -> nn.Module:
+def build_model(architecture: str, pretrained: bool, depth_supervision: bool = False) -> nn.Module:
+    """With depth supervision, the pooling and the classifier of a ResNet give way to a 1 x 1
+    convolution: one depth logit per cell of the last stage, flattened, 7 x 7 for a 224 px crop."""
     chosen = ARCHITECTURES[architecture]
     model = chosen.build(weights=chosen.weights if pretrained else None)
     parent_name, _, attribute = chosen.head.rpartition(".")
@@ -154,20 +181,32 @@ def build_model(architecture: str, pretrained: bool) -> nn.Module:
     classifier = parent.get_submodule(attribute)
     if not isinstance(classifier, nn.Linear):
         raise TypeError(f"{architecture}.{chosen.head} is not a linear classifier")
-    setattr(parent, attribute, nn.Linear(classifier.in_features, 1))
+    if depth_supervision:
+        model.avgpool = nn.Conv2d(classifier.in_features, 1, kernel_size=1)
+        model.fc = nn.Identity()
+    else:
+        setattr(parent, attribute, nn.Linear(classifier.in_features, 1))
     return model
 
 
 def train_detector(
-    images: Batch, is_attack: Labels, config: TrainingConfig, device: str
+    images: Batch,
+    is_attack: Labels,
+    config: TrainingConfig,
+    device: str,
+    depth_targets: DepthMaps | None = None,
 ) -> tuple[FineTunedDetector, list[float]]:
+    """Depth targets, one map per image at the resolution of the last stage, are required
+    with depth supervision and refused without it."""
+    if config.depth_supervision != (depth_targets is not None):
+        raise ValueError("depth targets go with depth supervision, and only with it")
     torch.manual_seed(config.seed)
     rng = np.random.default_rng(config.seed)
-    model = build_model(config.architecture, config.pretrained).to(device)
+    model = build_model(config.architecture, config.pretrained, config.depth_supervision)
+    model = model.to(device)
     attack_share = float(is_attack.mean())
-    loss_function = nn.BCEWithLogitsLoss(
-        pos_weight=torch.tensor((1.0 - attack_share) / attack_share, device=device)
-    )
+    attack_weight = (1.0 - attack_share) / attack_share
+    loss_function = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(attack_weight, device=device))
     optimiser = torch.optim.AdamW(
         model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
     )
@@ -187,14 +226,33 @@ def train_detector(
             inputs = _to_tensor(images[batch], device, mirrored)
             targets = torch.as_tensor(is_attack[batch], dtype=torch.float32, device=device)
             optimiser.zero_grad()
-            loss = loss_function(model(inputs).squeeze(1), targets)
+            if depth_targets is None:
+                loss = loss_function(model(inputs).squeeze(1), targets)
+            else:
+                maps = depth_targets[batch].copy()
+                maps[mirrored] = maps[mirrored, :, ::-1]
+                target_maps = torch.as_tensor(maps.reshape(len(batch), -1), device=device)
+                loss = depth_loss(model(inputs), target_maps, targets, attack_weight)
             loss.backward()
             optimiser.step()
             batch_losses.append(float(loss.detach().cpu()))
         epoch_losses.append(float(np.mean(batch_losses)))
     for hook in hooks:
         hook.remove()
-    return FineTunedDetector(model, config.architecture, device), epoch_losses
+    return (
+        FineTunedDetector(model, config.architecture, device, config.depth_supervision),
+        epoch_losses,
+    )
+
+
+def depth_loss(
+    logits: torch.Tensor, target_maps: torch.Tensor, is_attack: torch.Tensor, attack_weight: float
+) -> torch.Tensor:
+    """Mean squared error of the predicted depth map, each attack weighted so that both classes
+    weigh the same, as the binary loss weighs them."""
+    per_crop = ((torch.sigmoid(logits) - target_maps) ** 2).mean(dim=1)
+    weights = 1.0 + is_attack * (attack_weight - 1.0)
+    return (weights * per_crop).mean()
 
 
 def mix_styles(features: torch.Tensor, weights: np.ndarray, partners: np.ndarray) -> torch.Tensor:

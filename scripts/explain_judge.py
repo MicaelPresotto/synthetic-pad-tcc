@@ -12,6 +12,7 @@ from synthetic_pad.frames import (
     CORPORA,
     FACE_CROP_SCALE,
     CropSample,
+    face_cells,
     load_partitions,
     read_crops,
     select,
@@ -21,13 +22,6 @@ from synthetic_pad.judge.finetuned import AttentionMaps, FineTunedDetector
 
 SYNTHETIC_REPLAY = "synthetic replay"
 OVERLAY_OPACITY = 0.45
-
-
-def face_cells(grid: int, scale: float) -> np.ndarray:
-    """Cells of the attention grid whose centre falls inside the face box of the crop."""
-    centres = (np.arange(grid) + 0.5) / grid
-    inside = np.abs(centres - 0.5) <= 0.5 / scale
-    return np.asarray(inside[:, None] & inside[None, :])
 
 
 def face_share(maps: AttentionMaps, scale: float) -> np.ndarray:

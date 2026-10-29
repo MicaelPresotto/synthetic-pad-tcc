@@ -16,6 +16,7 @@ dependencies = [
     "matplotlib>=3.9",
     "torch>=2.5",
     "torchvision>=0.20",
+    "transformers>=5.22",
 ]
 
 [dependency-groups]

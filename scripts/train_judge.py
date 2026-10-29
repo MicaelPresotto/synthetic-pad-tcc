@@ -10,6 +10,7 @@ import torch
 
 from synthetic_pad.calibration import read_fitted_config
 from synthetic_pad.corpora import REPLAY
+from synthetic_pad.depth import read_depth_maps
 from synthetic_pad.domain import AttackGenerator, RgbImage
 from synthetic_pad.evaluation.report import pad_report
 from synthetic_pad.frames import (
@@ -128,6 +129,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="fraction of the bona fide training crops, drawn at random, that synthetic "
         "attacks are rendered from; below 1 the judge sees fewer synthetic than bona fide",
     )
+    parser.add_argument(
+        "--depth-maps",
+        type=Path,
+        help="supervise the judge with a depth map instead of one label per crop: the "
+        "pseudo-depth that estimate_depth.py wrote to this directory for each bona fide crop, "
+        "and a flat map for every attack",
+    )
     parser.add_argument("--frames", type=Path, default=Path("data/frames"))
     parser.add_argument(
         "--msu-split-seed",
@@ -164,6 +172,7 @@ def main() -> None:
         pretrained=not args.no_pretrained,
         epochs=args.epochs,
         mixstyle=args.mixstyle,
+        depth_supervision=args.depth_maps is not None,
         seed=args.seed,
     )
     partitions = load_partitions(args.frames, args.msu_split_seed)
@@ -194,7 +203,16 @@ def main() -> None:
         args.seed,
     )
 
-    detector, losses = train_detector(images, is_attack, config, args.device)
+    depth_targets = None
+    if args.depth_maps is not None:
+        bona_fide = [sample for sample in select(source, "train") if not sample.is_attack]
+        maps = read_depth_maps(
+            args.depth_maps / f"{args.train_corpus}.npz", bona_fide, args.frames / args.train_corpus
+        )
+        flat = np.zeros((int(is_attack.sum()), *maps.shape[1:]), dtype=np.float32)
+        depth_targets = np.concatenate([maps, flat])
+
+    detector, losses = train_detector(images, is_attack, config, args.device, depth_targets)
     detector.save(args.output / "judge.pt")
 
     scored: dict[str, tuple[list[CropSample], Scores]] = {}
@@ -217,6 +235,7 @@ def main() -> None:
             "noise_real_crops": args.noise_real_crops,
             "synthetic_per_face": args.synthetic_per_face,
             "synthetic_fraction": args.synthetic_fraction,
+            "depth_maps": str(args.depth_maps) if args.depth_maps else None,
             "config": asdict(config),
             "device": args.device,
             "torch": torch.__version__,
