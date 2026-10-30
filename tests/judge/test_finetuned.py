@@ -7,6 +7,7 @@ import torch
 
 from synthetic_pad.evaluation.metrics import auc
 from synthetic_pad.judge.finetuned import (
+    DEPTH_HEAD,
     FineTunedDetector,
     TrainingConfig,
     build_model,
@@ -48,6 +49,14 @@ class TestTrainingConfig:
     def test_rejects_depth_supervision_on_a_vision_transformer(self) -> None:
         with pytest.raises(ValueError, match="depth map"):
             TrainingConfig(architecture="vit_b_16", depth_supervision=True)
+
+    def test_rejects_a_depth_auxiliary_task_on_a_vision_transformer(self) -> None:
+        with pytest.raises(ValueError, match="depth map"):
+            TrainingConfig(architecture="vit_b_16", depth_auxiliary=True)
+
+    def test_rejects_a_depth_map_as_both_the_only_and_an_auxiliary_target(self) -> None:
+        with pytest.raises(ValueError, match="either"):
+            TrainingConfig(depth_supervision=True, depth_auxiliary=True)
 
 
 class TestTrainDetector:
@@ -232,6 +241,51 @@ class TestDepthSupervision:
         images, is_attack = separable_set(size=DEPTH_SIDE)
         with pytest.raises(ValueError, match="depth targets"):
             train_detector(images, is_attack, TINY, "cpu", relief_targets(is_attack))
+
+
+AUXILIARY = replace(TINY, depth_auxiliary=True)
+
+
+@pytest.fixture(scope="module")
+def auxiliary_trained() -> FineTunedDetector:
+    images, is_attack = separable_set(size=DEPTH_SIDE)
+    return train_detector(images, is_attack, AUXILIARY, "cpu", relief_targets(is_attack))[0]
+
+
+class TestDepthAuxiliary:
+    def test_keeps_one_attack_logit_beside_a_depth_head(self) -> None:
+        model = build_model("resnet18", pretrained=False, depth_auxiliary=True)
+        with torch.no_grad():
+            assert model(torch.zeros(3, 3, DEPTH_SIDE, DEPTH_SIDE)).shape == (3, 1)
+        assert isinstance(model.get_submodule(DEPTH_HEAD), torch.nn.Conv2d)
+
+    def test_learns_to_separate_an_easy_set(self, auxiliary_trained: FineTunedDetector) -> None:
+        images, is_attack = separable_set(size=DEPTH_SIDE)
+        scores = auxiliary_trained.score_batch(images)
+        assert auc(scores[is_attack], scores[~is_attack]) > 0.9
+        assert scores.min() >= 0.0
+        assert scores.max() <= 1.0
+
+    def test_scores_the_same_after_saving_and_loading(
+        self, auxiliary_trained: FineTunedDetector, tmp_path: Path
+    ) -> None:
+        images = separable_set(size=DEPTH_SIDE)[0]
+        auxiliary_trained.save(tmp_path / "judge.pt")
+        reloaded = FineTunedDetector.load(tmp_path / "judge.pt", device="cpu")
+        np.testing.assert_allclose(
+            reloaded.score_batch(images), auxiliary_trained.score_batch(images)
+        )
+
+    def test_still_gives_a_grad_cam_of_the_attack_logit(
+        self, auxiliary_trained: FineTunedDetector
+    ) -> None:
+        maps = auxiliary_trained.grad_cam(separable_set(count=2, size=DEPTH_SIDE)[0])
+        assert maps.shape == (2, 2, 2)
+
+    def test_needs_depth_targets(self) -> None:
+        images, is_attack = separable_set(size=DEPTH_SIDE)
+        with pytest.raises(ValueError, match="depth targets"):
+            train_detector(images, is_attack, AUXILIARY, "cpu")
 
 
 class TestDepthLoss:
