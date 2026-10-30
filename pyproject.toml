@@ -17,6 +17,8 @@ dependencies = [
     "torch>=2.5",
     "torchvision>=0.20",
     "transformers>=5.22",
+    "face-alignment>=1.5",
+    "scipy>=1.13",
 ]
 
 [dependency-groups]
@@ -76,7 +78,7 @@ disallow_untyped_defs = true
 no_implicit_reexport = true
 
 [[tool.mypy.overrides]]
-module = ["cv2.*", "matplotlib.*", "sklearn.*", "torchvision.*"]
+module = ["cv2.*", "face_alignment.*", "matplotlib.*", "scipy.*", "sklearn.*", "torchvision.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
