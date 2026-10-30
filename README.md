@@ -247,6 +247,15 @@ judge keeps its single attack label and learns the depth map beside it, the auxi
 supervision of Liu et al.: a 1 × 1 convolution on the last stage draws the map, its loss adds
 to the binary one at equal weight, and the score still comes from the label, so the judge is
 compared with the single-label ones at the same test and keeps Grad-CAM.
+`measure_depth.py` asks whether that pseudo-depth tells the classes apart at all. On the
+training crops of each corpus it prints, by species, how close each crop's estimated relief is
+in shape to the mean bona fide face, as a correlation over the face box, and how far its face
+box stands out from the rest of the crop. A depth sensor would measure a screen or a print as
+flat; an estimator that reads depth from the image may not.
+
+```bash
+uv run python scripts/measure_depth.py
+```
 
 ```bash
 uv run python scripts/estimate_depth.py
