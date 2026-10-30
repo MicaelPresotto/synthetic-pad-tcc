@@ -6,10 +6,22 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from scipy.interpolate import griddata
 
 from synthetic_pad.frames import FACE_CROP_SCALE, CropSample, face_cells
 
 DEPTH_GRID = 7
+
+
+def landmark_relief(landmarks: np.ndarray, side: int) -> np.ndarray:
+    """Relative depth of a square crop from face landmarks given as (x, y, z) in pixels, larger
+    z nearer: linear between the landmarks, and that of the nearest landmark outside their
+    hull, so that the forehead takes the depth of the brows."""
+    rows, columns = np.mgrid[0:side, 0:side]
+    points, nearness = landmarks[:, :2], landmarks[:, 2]
+    linear = griddata(points, nearness, (columns, rows), method="linear")
+    nearest = griddata(points, nearness, (columns, rows), method="nearest")
+    return np.asarray(np.where(np.isnan(linear), nearest, linear))
 
 
 def depth_target(relative_depth: np.ndarray, grid: int = DEPTH_GRID) -> np.ndarray:

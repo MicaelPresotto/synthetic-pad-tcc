@@ -1,4 +1,5 @@
 import argparse
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -6,19 +7,25 @@ import torch
 
 from synthetic_pad.dataset import write_manifest
 from synthetic_pad.depth import DEPTH_GRID, crop_key, depth_target, write_depth_maps
-from synthetic_pad.depth_estimation import (
-    DEPTH_MODEL,
-    DEPTH_MODEL_REVISION,
-    ESTIMATION_BATCH,
-    DepthAnything,
-)
+from synthetic_pad.depth_estimation import ESTIMATION_BATCH, DepthAnything, FaceModel
 from synthetic_pad.frames import CORPORA, FACE_CROP_SCALE, load_crops, read_crops
+
+ESTIMATORS: dict[str, Callable[[str], DepthAnything | FaceModel]] = {
+    "depth-anything": DepthAnything,
+    "face-model": FaceModel,
+}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Estimate the pseudo-depth of every bona fide crop of both corpora with "
-        "Depth Anything V2, as the target maps of a depth-supervised judge."
+        description="Estimate the pseudo-depth of every bona fide crop of both corpora, as the "
+        "target maps of a depth-supervised judge."
+    )
+    parser.add_argument(
+        "--estimator",
+        choices=sorted(ESTIMATORS),
+        default="depth-anything",
+        help="Depth Anything V2, a monocular depth estimator, or 3DFAN-4, a 3D face model",
     )
     parser.add_argument("--frames", type=Path, default=Path("data/frames"))
     parser.add_argument("--output", type=Path, default=Path("data/depth"))
@@ -31,7 +38,7 @@ def main() -> None:
     parser.add_argument("--device", default="mps" if torch.backends.mps.is_available() else "cpu")
     args = parser.parse_args()
 
-    estimator = DepthAnything(args.device)
+    estimator = ESTIMATORS[args.estimator](args.device)
     counts = {}
     for corpus in CORPORA:
         corpus_frames = args.frames / corpus
@@ -52,8 +59,8 @@ def main() -> None:
     write_manifest(
         args.output,
         {
-            "model": DEPTH_MODEL,
-            "revision": DEPTH_MODEL_REVISION,
+            "model": estimator.name,
+            "revision": estimator.revision,
             "grid": args.grid,
             "face_crop_scale": FACE_CROP_SCALE,
             "bona_fide_crops": counts,

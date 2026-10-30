@@ -8,6 +8,7 @@ from synthetic_pad.depth import (
     crop_key,
     depth_target,
     face_prominence,
+    landmark_relief,
     read_depth_maps,
     shape_similarity,
     write_depth_maps,
@@ -105,3 +106,25 @@ class TestShapeSimilarity:
     def test_is_zero_for_a_map_with_no_relief(self) -> None:
         reference = depth_target(face_relief())
         assert shape_similarity(np.zeros((1, 7, 7)), reference)[0] == 0.0
+
+
+def cone_landmarks() -> np.ndarray:
+    """A ring of far landmarks around one near landmark at the centre of a 64 px crop."""
+    angles = np.linspace(0.0, 2.0 * np.pi, 12, endpoint=False)
+    ring = np.stack([32 + 20 * np.cos(angles), 32 + 20 * np.sin(angles), np.zeros(12)], axis=1)
+    return np.vstack([ring, [[32.0, 32.0, 1.0]]])
+
+
+class TestLandmarkRelief:
+    def test_is_nearest_at_the_nearest_landmark(self) -> None:
+        relief = landmark_relief(cone_landmarks(), 64)
+        assert relief[32, 32] == pytest.approx(1.0)
+        assert relief[32, 42] == pytest.approx(0.5, abs=0.05)
+
+    def test_takes_the_depth_of_the_nearest_landmark_outside_their_hull(self) -> None:
+        landmarks = cone_landmarks()
+        landmarks[0, 2] = 0.3
+        relief = landmark_relief(landmarks, 64)
+        assert not np.isnan(relief).any()
+        assert relief[32, 63] == pytest.approx(0.3)
+        assert relief[0, 0] == pytest.approx(0.0)
