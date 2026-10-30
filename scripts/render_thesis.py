@@ -655,6 +655,7 @@ def mixstyle_table(real: Runs, mixed: Runs, mixstyle: Runs) -> str:
         "sinusoidal fringes and matched noise: intra-dataset and cross-dataset HTER (\\%), "
         "the paired cross-dataset difference to the real detector without MixStyle with its "
         "95\\% bootstrap interval and the seeds in which it improved, and the replay AUC. "
+        "A negative difference is a lower error than that of the real detector. "
         "Mean over ten seeds.",
         "tab:mixstyle",
         "l" + CENTRED_X * 2 + "cc" + CENTRED_X,
@@ -685,6 +686,7 @@ def splits_table(splits: Sequence[tuple[str, Runs]]) -> str:
         "held out as the development partition: cross-dataset HTER (\\%) of the real and the "
         "mixed detectors with matched noise, the paired difference with its 95\\% bootstrap "
         "interval and the seeds in which the mixed detector improved, and the replay AUC. "
+        "A negative difference is a lower error than that of the real detector. "
         "Mean over ten seeds; the last row pools the draws, and its interval resamples the "
         "draws rather than the seeds.",
         "tab:splits",
