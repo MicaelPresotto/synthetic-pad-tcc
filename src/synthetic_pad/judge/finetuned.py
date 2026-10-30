@@ -26,6 +26,7 @@ SCORING_BATCH = 128
 MIXSTYLE_PROBABILITY = 0.5
 MIXSTYLE_ALPHA = 0.1
 MIXSTYLE_EPSILON = 1e-6
+DEPTH_HEAD = "depth_head"
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +77,7 @@ class TrainingConfig:
     weight_decay: float = 1e-4
     mixstyle: bool = False
     depth_supervision: bool = False
+    depth_auxiliary: bool = False
     seed: int = 20260928
 
     def __post_init__(self) -> None:
@@ -83,7 +85,11 @@ class TrainingConfig:
             raise ValueError(f"architecture must be one of {sorted(ARCHITECTURES)}")
         if self.mixstyle and not ARCHITECTURES[self.architecture].mixstyle_stages:
             raise ValueError(f"{self.architecture} has no convolutional stages for MixStyle")
-        if self.depth_supervision and ARCHITECTURES[self.architecture].grad_cam_stage is None:
+        if self.depth_supervision and self.depth_auxiliary:
+            raise ValueError("a depth map is either the only target or an auxiliary one")
+        if (self.depth_supervision or self.depth_auxiliary) and ARCHITECTURES[
+            self.architecture
+        ].grad_cam_stage is None:
             raise ValueError(f"{self.architecture} has no convolutional stage to draw a depth map")
         require_positive(
             epochs=self.epochs, batch_size=self.batch_size, learning_rate=self.learning_rate
@@ -94,12 +100,18 @@ class FineTunedDetector(LivenessDetector):
     name = "finetuned"
 
     def __init__(
-        self, model: nn.Module, architecture: str, device: str, depth_supervision: bool = False
+        self,
+        model: nn.Module,
+        architecture: str,
+        device: str,
+        depth_supervision: bool = False,
+        depth_auxiliary: bool = False,
     ) -> None:
         self._model = model.to(device).eval()
         self._architecture = architecture
         self._device = device
         self._depth_supervision = depth_supervision
+        self._depth_auxiliary = depth_auxiliary
 
     def score(self, image: RgbImage) -> float:
         ensure_rgb_uint8(image)
@@ -155,6 +167,7 @@ class FineTunedDetector(LivenessDetector):
             {
                 "architecture": self._architecture,
                 "depth_supervision": self._depth_supervision,
+                "depth_auxiliary": self._depth_auxiliary,
                 "state": self._model.state_dict(),
             },
             path,
@@ -164,16 +177,22 @@ class FineTunedDetector(LivenessDetector):
     def load(cls, path: Path, device: str) -> "FineTunedDetector":
         saved = torch.load(path, map_location=device, weights_only=True)
         depth_supervision = saved.get("depth_supervision", False)
-        model = build_model(
-            saved["architecture"], pretrained=False, depth_supervision=depth_supervision
-        )
+        depth_auxiliary = saved.get("depth_auxiliary", False)
+        model = build_model(saved["architecture"], False, depth_supervision, depth_auxiliary)
         model.load_state_dict(saved["state"])
-        return cls(model, saved["architecture"], device, depth_supervision)
+        return cls(model, saved["architecture"], device, depth_supervision, depth_auxiliary)
 
 
-def build_model(architecture: str, pretrained: bool, depth_supervision: bool = False) -> nn.Module:
+def build_model(
+    architecture: str,
+    pretrained: bool,
+    depth_supervision: bool = False,
+    depth_auxiliary: bool = False,
+) -> nn.Module:
     """With depth supervision, the pooling and the classifier of a ResNet give way to a 1 x 1
-    convolution: one depth logit per cell of the last stage, flattened, 7 x 7 for a 224 px crop."""
+    convolution: one depth logit per cell of the last stage, flattened, 7 x 7 for a 224 px crop.
+    With a depth auxiliary task, the classifier stays and that convolution, the depth head,
+    reads the last stage beside it."""
     chosen = ARCHITECTURES[architecture]
     model = chosen.build(weights=chosen.weights if pretrained else None)
     parent_name, _, attribute = chosen.head.rpartition(".")
@@ -186,6 +205,8 @@ def build_model(architecture: str, pretrained: bool, depth_supervision: bool = F
         model.fc = nn.Identity()
     else:
         setattr(parent, attribute, nn.Linear(classifier.in_features, 1))
+    if depth_auxiliary:
+        model.add_module(DEPTH_HEAD, nn.Conv2d(classifier.in_features, 1, kernel_size=1))
     return model
 
 
@@ -197,12 +218,15 @@ def train_detector(
     depth_targets: DepthMaps | None = None,
 ) -> tuple[FineTunedDetector, list[float]]:
     """Depth targets, one map per image at the resolution of the last stage, are required
-    with depth supervision and refused without it."""
-    if config.depth_supervision != (depth_targets is not None):
-        raise ValueError("depth targets go with depth supervision, and only with it")
+    with depth supervision or a depth auxiliary task and refused without them. The auxiliary
+    loss adds to the binary one at equal weight."""
+    if (config.depth_supervision or config.depth_auxiliary) != (depth_targets is not None):
+        raise ValueError("depth targets go with a depth map to learn, and only with it")
     torch.manual_seed(config.seed)
     rng = np.random.default_rng(config.seed)
-    model = build_model(config.architecture, config.pretrained, config.depth_supervision)
+    model = build_model(
+        config.architecture, config.pretrained, config.depth_supervision, config.depth_auxiliary
+    )
     model = model.to(device)
     attack_share = float(is_attack.mean())
     attack_weight = (1.0 - attack_share) / attack_share
@@ -214,6 +238,14 @@ def train_detector(
     hooks = [
         model.get_submodule(stage).register_forward_hook(_mixstyle_hook(rng)) for stage in stages
     ]
+    last_stage: list[torch.Tensor] = []
+    stage_name = ARCHITECTURES[config.architecture].grad_cam_stage
+    if config.depth_auxiliary and stage_name is not None:
+        hooks.append(
+            model.get_submodule(stage_name).register_forward_hook(
+                lambda _module, _inputs, out: last_stage.append(out)
+            )
+        )
 
     epoch_losses = []
     for _ in range(config.epochs):
@@ -226,13 +258,20 @@ def train_detector(
             inputs = _to_tensor(images[batch], device, mirrored)
             targets = torch.as_tensor(is_attack[batch], dtype=torch.float32, device=device)
             optimiser.zero_grad()
+            outputs = model(inputs)
             if depth_targets is None:
-                loss = loss_function(model(inputs).squeeze(1), targets)
+                loss = loss_function(outputs.squeeze(1), targets)
             else:
                 maps = depth_targets[batch].copy()
                 maps[mirrored] = maps[mirrored, :, ::-1]
                 target_maps = torch.as_tensor(maps.reshape(len(batch), -1), device=device)
-                loss = depth_loss(model(inputs), target_maps, targets, attack_weight)
+                if config.depth_auxiliary:
+                    depth_logits = model.get_submodule(DEPTH_HEAD)(last_stage.pop()).flatten(1)
+                    loss = loss_function(outputs.squeeze(1), targets) + depth_loss(
+                        depth_logits, target_maps, targets, attack_weight
+                    )
+                else:
+                    loss = depth_loss(outputs, target_maps, targets, attack_weight)
             loss.backward()
             optimiser.step()
             batch_losses.append(float(loss.detach().cpu()))
@@ -240,7 +279,13 @@ def train_detector(
     for hook in hooks:
         hook.remove()
     return (
-        FineTunedDetector(model, config.architecture, device, config.depth_supervision),
+        FineTunedDetector(
+            model,
+            config.architecture,
+            device,
+            config.depth_supervision,
+            config.depth_auxiliary,
+        ),
         epoch_losses,
     )
 

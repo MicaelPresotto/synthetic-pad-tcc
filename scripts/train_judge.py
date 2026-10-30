@@ -136,6 +136,12 @@ def build_parser() -> argparse.ArgumentParser:
         "pseudo-depth that estimate_depth.py wrote to this directory for each bona fide crop, "
         "and a flat map for every attack",
     )
+    parser.add_argument(
+        "--depth-auxiliary",
+        action="store_true",
+        help="with --depth-maps, keep the single attack label and learn the depth map beside it "
+        "as an auxiliary task; the score still comes from the label",
+    )
     parser.add_argument("--frames", type=Path, default=Path("data/frames"))
     parser.add_argument(
         "--msu-split-seed",
@@ -165,6 +171,8 @@ def main() -> None:
         parser.error(f"--synthetic-per-face must be at least 1, got {args.synthetic_per_face}")
     if not 0 < args.synthetic_fraction <= 1:
         parser.error(f"--synthetic-fraction must be in (0, 1], got {args.synthetic_fraction}")
+    if args.depth_auxiliary and args.depth_maps is None:
+        parser.error("--depth-auxiliary needs --depth-maps")
     if args.spectral_band is not None and (args.generator_config or args.noise_real_crops):
         parser.error("--spectral-band replaces the moire generator and its sensor noise")
     config = TrainingConfig(
@@ -172,7 +180,8 @@ def main() -> None:
         pretrained=not args.no_pretrained,
         epochs=args.epochs,
         mixstyle=args.mixstyle,
-        depth_supervision=args.depth_maps is not None,
+        depth_supervision=args.depth_maps is not None and not args.depth_auxiliary,
+        depth_auxiliary=args.depth_auxiliary,
         seed=args.seed,
     )
     partitions = load_partitions(args.frames, args.msu_split_seed)

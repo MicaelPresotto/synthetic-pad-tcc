@@ -242,7 +242,11 @@ box and zero outside it; the target of every attack, real or synthetic, is flat.
 one minus the mean of the predicted map, so the threshold and the metrics apply unchanged;
 Grad-CAM, which needs an attack logit, does not. `estimate_depth.py` writes the targets once,
 for every bona fide crop of both corpora, with Depth Anything V2 Small at a pinned revision,
-run locally: nothing of the corpora leaves the machine.
+run locally: nothing of the corpora leaves the machine. With `--depth-auxiliary` as well, the
+judge keeps its single attack label and learns the depth map beside it, the auxiliary
+supervision of Liu et al.: a 1 × 1 convolution on the last stage draws the map, its loss adds
+to the binary one at equal weight, and the score still comes from the label, so the judge is
+compared with the single-label ones at the same test and keeps Grad-CAM.
 
 ```bash
 uv run python scripts/estimate_depth.py
