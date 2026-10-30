@@ -58,6 +58,18 @@ class TestTrainingConfig:
         with pytest.raises(ValueError, match="either"):
             TrainingConfig(depth_supervision=True, depth_auxiliary=True)
 
+    def test_rejects_an_unknown_depth_stage(self) -> None:
+        with pytest.raises(ValueError, match="depth_stage"):
+            TrainingConfig(depth_auxiliary=True, depth_stage="layer2")
+
+    def test_rejects_a_depth_weight_without_a_depth_auxiliary_task(self) -> None:
+        with pytest.raises(ValueError, match="auxiliary task only"):
+            TrainingConfig(depth_supervision=True, depth_weight=10.0)
+
+    def test_rejects_a_zero_depth_weight(self) -> None:
+        with pytest.raises(ValueError, match="depth_weight"):
+            TrainingConfig(depth_auxiliary=True, depth_weight=0.0)
+
 
 class TestTrainDetector:
     def test_records_one_loss_per_epoch(
@@ -193,10 +205,11 @@ DEPTH = replace(TINY, depth_supervision=True)
 DEPTH_SIDE = 64
 
 
-def relief_targets(is_attack: np.ndarray) -> np.ndarray:
-    """A raised map for every bona fide image and a flat one for every attack, on the 2 x 2
-    grid that a 64 px image leaves at the last stage."""
-    return np.where(is_attack[:, None, None], 0.0, 1.0).repeat(2, 1).repeat(2, 2).astype(np.float32)
+def relief_targets(is_attack: np.ndarray, side: int = 2) -> np.ndarray:
+    """A raised map for every bona fide image and a flat one for every attack, by default on
+    the 2 x 2 grid that a 64 px image leaves at the last stage."""
+    raised = np.where(is_attack[:, None, None], 0.0, 1.0)
+    return raised.repeat(side, 1).repeat(side, 2).astype(np.float32)
 
 
 @pytest.fixture(scope="module")
@@ -286,6 +299,24 @@ class TestDepthAuxiliary:
         images, is_attack = separable_set(size=DEPTH_SIDE)
         with pytest.raises(ValueError, match="depth targets"):
             train_detector(images, is_attack, AUXILIARY, "cpu")
+
+    def test_reads_the_chosen_stage(self) -> None:
+        model = build_model("resnet18", False, depth_auxiliary=True, depth_stage="layer3")
+        head = model.get_submodule(DEPTH_HEAD)
+        assert isinstance(head, torch.nn.Conv2d)
+        assert head.in_channels == 256
+
+    def test_a_layer3_head_learns_the_finer_map_and_survives_saving_and_loading(
+        self, tmp_path: Path
+    ) -> None:
+        images, is_attack = separable_set(size=DEPTH_SIDE)
+        config = replace(AUXILIARY, depth_stage="layer3", depth_weight=10.0)
+        detector = train_detector(images, is_attack, config, "cpu", relief_targets(is_attack, 4))[0]
+        scores = detector.score_batch(images)
+        assert auc(scores[is_attack], scores[~is_attack]) > 0.9
+        detector.save(tmp_path / "judge.pt")
+        reloaded = FineTunedDetector.load(tmp_path / "judge.pt", device="cpu")
+        np.testing.assert_allclose(reloaded.score_batch(images), scores)
 
 
 class TestDepthLoss:

@@ -25,6 +25,7 @@ from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
 from synthetic_pad.generators.spectral import SpectralConfig, SpectralTransferGenerator
 from synthetic_pad.judge.finetuned import (
     ARCHITECTURES,
+    DEPTH_STAGES,
     Scores,
     TrainingConfig,
     train_detector,
@@ -142,6 +143,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="with --depth-maps, keep the single attack label and learn the depth map beside it "
         "as an auxiliary task; the score still comes from the label",
     )
+    parser.add_argument(
+        "--depth-stage",
+        choices=DEPTH_STAGES,
+        default=DEFAULTS.depth_stage,
+        help="with --depth-auxiliary, the ResNet stage the depth head reads: layer4 draws a "
+        "7 x 7 map of a 224 px crop, layer3 a 14 x 14 one; the depth maps must match it",
+    )
+    parser.add_argument(
+        "--depth-weight",
+        type=float,
+        default=DEFAULTS.depth_weight,
+        help="with --depth-auxiliary, the weight of the depth loss against the binary one",
+    )
     parser.add_argument("--frames", type=Path, default=Path("data/frames"))
     parser.add_argument(
         "--msu-split-seed",
@@ -182,6 +196,8 @@ def main() -> None:
         mixstyle=args.mixstyle,
         depth_supervision=args.depth_maps is not None and not args.depth_auxiliary,
         depth_auxiliary=args.depth_auxiliary,
+        depth_stage=args.depth_stage,
+        depth_weight=args.depth_weight,
         seed=args.seed,
     )
     partitions = load_partitions(args.frames, args.msu_split_seed)

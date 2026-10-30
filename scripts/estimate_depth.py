@@ -22,6 +22,12 @@ def main() -> None:
     )
     parser.add_argument("--frames", type=Path, default=Path("data/frames"))
     parser.add_argument("--output", type=Path, default=Path("data/depth"))
+    parser.add_argument(
+        "--grid",
+        type=int,
+        default=DEPTH_GRID,
+        help="cells per side of each map: 7 for a depth head on layer4, 14 for one on layer3",
+    )
     parser.add_argument("--device", default="mps" if torch.backends.mps.is_available() else "cpu")
     args = parser.parse_args()
 
@@ -33,7 +39,9 @@ def main() -> None:
         maps: list[np.ndarray] = []
         for start in range(0, len(bona_fide), ESTIMATION_BATCH):
             images = read_crops(bona_fide[start : start + ESTIMATION_BATCH])
-            maps.extend(depth_target(depth) for depth in estimator.relative_depth(images))
+            maps.extend(
+                depth_target(depth, args.grid) for depth in estimator.relative_depth(images)
+            )
         stacked = np.stack(maps)
         keys = [crop_key(sample, corpus_frames) for sample in bona_fide]
         write_depth_maps(args.output / f"{corpus}.npz", keys, stacked)
@@ -46,7 +54,7 @@ def main() -> None:
         {
             "model": DEPTH_MODEL,
             "revision": DEPTH_MODEL_REVISION,
-            "grid": DEPTH_GRID,
+            "grid": args.grid,
             "face_crop_scale": FACE_CROP_SCALE,
             "bona_fide_crops": counts,
         },
