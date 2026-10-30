@@ -665,6 +665,54 @@ def mixstyle_table(real: Runs, mixed: Runs, mixstyle: Runs) -> str:
     )
 
 
+def depth_table(one_label: Runs, variants: Sequence[tuple[str, Runs]]) -> str:
+    rows = []
+    for source, target in DIRECTIONS:
+        rows.append(direction_heading(source, target, 6))
+        for data in CONFIGURATIONS:
+            for title, runs in ((data.capitalize(), one_label), *variants):
+                trained = runs[(source, data)]
+                versus_real = (
+                    NOT_RUN
+                    if data == "real"
+                    else difference_with_interval(
+                        cross_hter_differences(trained, runs[(source, "real")])
+                    )
+                )
+                versus_one_label = (
+                    NOT_RUN
+                    if runs is one_label
+                    else difference_with_interval(
+                        cross_hter_differences(trained, one_label[(source, data)])
+                    )
+                )
+                cells = [
+                    title,
+                    percent_mean(trained, hter_of("intra")),
+                    percent_mean(trained, hter_of("cross")),
+                    versus_real,
+                    versus_one_label,
+                    f"{measured(trained, cross_auc('replay')).mean():.3f}",
+                ]
+                rows.append("\t\t" + " & ".join(cells) + " \\\\")
+        if source != DIRECTIONS[-1][0]:
+            rows.append("\t\t\\midrule")
+    return table(
+        "Detectors trained with one label per crop, with a depth map instead of the label, and "
+        "with a depth map beside the label as an auxiliary task, on real, synthetic and mixed "
+        "attacks, with the sinusoidal fringes and matched noise: intra-dataset and cross-dataset "
+        "HTER (\\%), the paired cross-dataset difference to the real detector of the same "
+        "supervision and to the detector with one label trained on the same attacks, each with "
+        "its 95\\% bootstrap interval, and the replay AUC. A negative difference is a lower "
+        "error than that of the detector compared with. Mean over ten seeds.",
+        "tab:depth",
+        "l" + CENTRED_X * 2 + "cc" + CENTRED_X,
+        "\\textbf{Attacks} & \\textbf{HTER intra} & \\textbf{HTER cross} & "
+        "\\textbf{Cross $-$ real} & \\textbf{Cross $-$ one label} & \\textbf{AUC replay}",
+        rows,
+    )
+
+
 def splits_table(splits: Sequence[tuple[str, Runs]]) -> str:
     rows = []
     for title, runs in splits:
@@ -1096,6 +1144,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="real and mixed ResNet-18 judges trained with MixStyle, matched-noise generator",
     )
     parser.add_argument(
+        "--depth",
+        type=Path,
+        default=Path("results/depth"),
+        help="real, synthetic and mixed ResNet-18 judges supervised with pseudo-depth maps, "
+        "matched-noise generator",
+    )
+    parser.add_argument(
+        "--depth-auxiliary",
+        type=Path,
+        default=Path("results/depth-auxiliary"),
+        help="the same judges with the depth map as an auxiliary task beside the attack label",
+    )
+    parser.add_argument(
         "--vit",
         type=Path,
         nargs=2,
@@ -1132,6 +1193,8 @@ def main() -> None:
     screen_one, screen_three = (find_runs(path) for path in args.screen)
     spectral_main, spectral_narrow = (find_runs(path) for path in args.spectral)
     vit_b16, vit_b32 = (find_runs(path) for path in args.vit)
+    depth = find_runs(args.depth)
+    depth_auxiliary = find_runs(args.depth_auxiliary)
     splits = [
         ("Original", {**real_only, ("msu", "mixed"): matched_one[("msu", "mixed")]}),
         *((f"Split {index}", find_runs(path)) for index, path in enumerate(args.msu_splits, 1)),
@@ -1174,6 +1237,13 @@ def main() -> None:
             )
         ),
         "tab-mixstyle.tex": mixstyle_table(clean, matched_one, find_runs(args.mixstyle)),
+        "tab-depth.tex": depth_table(
+            {**matched_one, **real_only},
+            (
+                ("\\quad depth instead of label", depth),
+                ("\\quad depth beside label", depth_auxiliary),
+            ),
+        ),
         "tab-splits.tex": splits_table(splits),
         "tab-calibration.tex": calibration_table(first_generator),
     }
@@ -1211,6 +1281,10 @@ def main() -> None:
         print_paired_differences(title, {**runs, **real_only})
     print_paired_differences("ViT-B/16, sinusoidal, matched noise", vit_b16)
     print_paired_differences("ViT-B/32, sinusoidal, matched noise", vit_b32)
+    print_paired_differences("ResNet-18 with depth maps, sinusoidal, matched noise", depth)
+    print_paired_differences(
+        "ResNet-18 with a depth map beside the label, sinusoidal, matched noise", depth_auxiliary
+    )
     print_spectrum_fit(calibrated)
 
 
