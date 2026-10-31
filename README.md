@@ -278,6 +278,19 @@ uv run python scripts/train_judge.py --train-corpus msu --data mixed --depth-map
   --output results/depth/msu-mixed-seed1
 ```
 
+`measure_blinks.py` asks what a motion cue does that a single frame cannot: a face blinks, a
+printed photo does not, and a replayed video replays the blinks of a live face. With no
+training, it scores each development and test video of both corpora by the eye aspect ratio
+(EAR) of Soukupová and Čech (2016), from the 3DFAN-4 landmarks of every third frame inside
+the annotated face box: the lowest EAR over the median, near 1 when the eyes never close. The
+PAD metrics follow at the threshold each development set fixes, within and across corpora,
+split into prints and replays of a photo or of a video. The unit is a video, not a crop, and
+the EAR series are kept in `results/blinks/` and reused.
+
+```bash
+uv run python scripts/measure_blinks.py
+```
+
 `explain_judge.py` shows where a trained judge looks. It computes Grad-CAM of the
 attack logit over the test crops of both corpora, split by species, together with one
 synthetic replay rendered from each bona fide test crop. It writes `attention.json`
