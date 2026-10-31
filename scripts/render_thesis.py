@@ -681,9 +681,11 @@ def mixstyle_table(real: Runs, mixed: Runs, mixstyle: Runs) -> str:
 
 
 def depth_table(one_label: Runs, variants: Sequence[tuple[str, Runs]]) -> str:
-    rows = []
+    """One table per direction; the second refers to the first for its columns."""
+    first_label = f"tab:depth-{DIRECTIONS[0][0]}"
+    tables = []
     for source, target in DIRECTIONS:
-        rows.append(direction_heading(source, target, 6))
+        rows = []
         for data in CONFIGURATIONS:
             for title, runs in ((data.capitalize(), one_label), *variants):
                 trained = runs[(source, data)]
@@ -710,24 +712,33 @@ def depth_table(one_label: Runs, variants: Sequence[tuple[str, Runs]]) -> str:
                     f"{measured(trained, cross_auc('replay')).mean():.3f}",
                 ]
                 rows.append("\t\t" + " & ".join(cells) + " \\\\")
-        if source != DIRECTIONS[-1][0]:
-            rows.append("\t\t\\midrule")
-    return table(
-        "Detectors trained with one label per crop, with a depth map instead of the label, and "
-        "with a depth map beside the label as an auxiliary task: 7 $\\times$ 7 from Depth "
-        "Anything V2 at equal weight, 14 $\\times$ 14, ten times the weight of the label, and 7 "
-        "$\\times$ 7 from a 3D face model. All on real, synthetic and mixed attacks, with the "
-        "sinusoidal fringes and matched noise: intra-dataset and cross-dataset "
-        "HTER (\\%), the paired cross-dataset difference to the real detector of the same "
-        "supervision and to the detector with one label trained on the same attacks, each with "
-        "its 95\\% bootstrap interval, and the replay AUC. A negative difference is a lower "
-        "error than that of the detector compared with. Mean over ten seeds.",
-        "tab:depth",
-        "l" + CENTRED_X * 2 + "cc" + CENTRED_X,
-        "\\textbf{Attacks} & \\textbf{HTER intra} & \\textbf{HTER cross} & "
-        "\\textbf{Cross $-$ real} & \\textbf{Cross $-$ one label} & \\textbf{AUC replay}",
-        rows,
-    )
+        direction = f"from {CORPUS_NAMES[source]} to {CORPUS_NAMES[target]}"
+        caption = (
+            "Detectors trained with one label per crop, with a depth map instead of the label, "
+            "and with a depth map beside the label as an auxiliary task: 7 $\\times$ 7 from "
+            "Depth Anything V2 at equal weight, 14 $\\times$ 14, ten times the weight of the "
+            "label, and 7 $\\times$ 7 from a 3D face model. All on real, synthetic and mixed "
+            "attacks, with the sinusoidal fringes and matched noise: intra-dataset and "
+            "cross-dataset HTER (\\%), the paired cross-dataset difference to the real detector "
+            "of the same supervision and to the detector with one label trained on the same "
+            "attacks, each with its 95\\% bootstrap interval, and the replay AUC. A negative "
+            "difference is a lower error than that of the detector compared with. Mean over ten "
+            f"seeds, {direction}."
+            if source == DIRECTIONS[0][0]
+            else f"As Table~\\ref{{{first_label}}}, {direction}."
+        )
+        tables.append(
+            table(
+                caption,
+                f"tab:depth-{source}",
+                "l" + CENTRED_X * 2 + "cc" + CENTRED_X,
+                "\\textbf{Attacks} & \\textbf{HTER intra} & \\textbf{HTER cross} & "
+                "\\textbf{Cross $-$ real} & \\textbf{Cross $-$ one label} & "
+                "\\textbf{AUC replay}",
+                rows,
+            )
+        )
+    return "\n".join(tables)
 
 
 def splits_table(splits: Sequence[tuple[str, Runs]]) -> str:
