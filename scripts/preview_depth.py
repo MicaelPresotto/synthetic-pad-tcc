@@ -10,7 +10,7 @@ from skimage.feature import Cascade
 
 from synthetic_pad.calibration import read_fitted_config
 from synthetic_pad.dataset import WORKING_RESOLUTION, read_image
-from synthetic_pad.depth import depth_target, face_prominence, shape_similarity
+from synthetic_pad.depth import DEPTH_GRID, depth_target, face_prominence, shape_similarity
 from synthetic_pad.depth_estimation import DepthAnything, FaceModel
 from synthetic_pad.domain import RgbImage
 from synthetic_pad.frames import FACE_CROP_SCALE, square_face_crop
@@ -20,7 +20,7 @@ FINE_GRID = 14
 DETECTION_SCALE_FACTOR = 1.2
 SMALLEST_FACE_PX = 60
 FIGURE_WIDTH_IN = 6.3
-FIGURE_HEIGHT_IN = 2.9
+FIGURE_HEIGHT_IN = 2.6
 COLOUR_MAP = "viridis"
 INK = "#52514e"
 COLUMN_TITLES = (
@@ -29,6 +29,7 @@ COLUMN_TITLES = (
     r"7$\times$7",
     r"14$\times$14",
     r"3DFAN-4, 7$\times$7",
+    "Training target",
 )
 ROW_TITLES = ("Bona fide", "Synthetic replay")
 
@@ -67,8 +68,9 @@ def print_similarity(estimator: str, depths: np.ndarray) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Relative depth of a bona fide portrait and of a synthetic replay of it, with "
-        "the maps a depth-supervised judge would be trained on, side by side."
+        description="Relative depth of a bona fide portrait and of a synthetic replay of it, the "
+        "maps estimated from both, and the target a depth-supervised judge trains each on: the "
+        "estimated map for the bona fide crop, a flat one for the replay."
     )
     parser.add_argument(
         "--input",
@@ -98,8 +100,9 @@ def main() -> None:
 
     figure = Figure(figsize=(FIGURE_WIDTH_IN, FIGURE_HEIGHT_IN), layout="constrained")
     axes = figure.subplots(len(ROW_TITLES), len(COLUMN_TITLES))
-    for row_axes, crop, depth, landmarks, title in zip(
-        axes, crops, estimated, from_landmarks, ROW_TITLES, strict=True
+    targets = (depth_target(estimated[0]), np.zeros((DEPTH_GRID, DEPTH_GRID)))
+    for row_axes, crop, depth, landmarks, target, title in zip(
+        axes, crops, estimated, from_landmarks, targets, ROW_TITLES, strict=True
     ):
         row_axes[0].imshow(crop)
         maps = (
@@ -107,6 +110,7 @@ def main() -> None:
             depth_target(depth),
             depth_target(depth, FINE_GRID),
             depth_target(landmarks),
+            target,
         )
         for axis, relief in zip(row_axes[1:], maps, strict=True):
             axis.imshow(relief, cmap=COLOUR_MAP, vmin=0, vmax=1, interpolation="nearest")

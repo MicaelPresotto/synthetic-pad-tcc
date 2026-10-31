@@ -260,8 +260,9 @@ uv run python scripts/measure_depth.py
 `preview_depth.py` draws the example figure of the depth section in the thesis. It cuts the
 face of a bona fide portrait as the crops of the corpora were cut, with the face detector that
 ships with scikit-image, renders a synthetic replay of it, and shows the relative depth that
-each estimator finds in both, with the maps a depth-supervised judge would train on. It also
-prints how close the relief of the replay is to that of the bona fide face.
+each estimator finds in both, the maps drawn from it, and the target each crop is trained on:
+the estimated map for the bona fide face, a flat one for the replay. It also prints how close
+the relief of the replay is to that of the bona fide face.
 
 ```bash
 uv run python scripts/preview_depth.py --input monographs/portrait-eileen-collins-nasa.png \
