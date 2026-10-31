@@ -19,6 +19,7 @@ dependencies = [
     "transformers>=5.22",
     "face-alignment>=1.5",
     "scipy>=1.13",
+    "scikit-image>=0.24",
 ]
 
 [dependency-groups]
@@ -76,6 +77,7 @@ strict = true
 warn_unreachable = true
 disallow_untyped_defs = true
 no_implicit_reexport = true
+untyped_calls_exclude = ["skimage"]
 
 [[tool.mypy.overrides]]
 module = ["cv2.*", "face_alignment.*", "matplotlib.*", "scipy.*", "sklearn.*", "torchvision.*"]
