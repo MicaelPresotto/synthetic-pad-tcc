@@ -1,4 +1,5 @@
 import argparse
+from collections.abc import Sequence
 from pathlib import Path
 
 import cv2
@@ -20,7 +21,8 @@ FINE_GRID = 14
 DETECTION_SCALE_FACTOR = 1.2
 SMALLEST_FACE_PX = 60
 FIGURE_WIDTH_IN = 6.3
-FIGURE_HEIGHT_IN = 2.6
+TITLE_HEIGHT_IN = 0.2
+ROW_HEIGHT_IN = 1.2
 COLOUR_MAP = "viridis"
 INK = "#52514e"
 COLUMN_TITLES = (
@@ -31,7 +33,6 @@ COLUMN_TITLES = (
     r"3DFAN-4, 7$\times$7",
     "Training target",
 )
-ROW_TITLES = ("Bona fide", "Synthetic replay")
 
 
 def face_crop(image: RgbImage) -> RgbImage:
@@ -56,21 +57,22 @@ def unit_range(depth: np.ndarray) -> np.ndarray:
     return np.asarray((depth - depth.min()) / np.ptp(depth))
 
 
-def print_similarity(estimator: str, depths: np.ndarray) -> None:
+def print_similarity(estimator: str, depths: np.ndarray, names: Sequence[str]) -> None:
     maps = np.stack([depth_target(depth) for depth in depths])
-    similarity = shape_similarity(maps[1:], maps[0])[0]
-    bona_fide, replay = (face_prominence(depth) for depth in depths)
-    print(
-        f"{estimator}: replay shape similarity to the bona fide map {similarity:.2f}, "
-        f"face prominence bona fide {bona_fide:.2f}, replay {replay:.2f}"
-    )
+    similarities = shape_similarity(maps, maps[0])
+    for name, depth, similarity in zip(names, depths, similarities, strict=True):
+        print(
+            f"{estimator}, {name}: shape similarity to the bona fide map {similarity:.2f}, "
+            f"face prominence {face_prominence(depth):.2f}"
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Relative depth of a bona fide portrait and of a synthetic replay of it, the "
-        "maps estimated from both, and the target a depth-supervised judge trains each on: the "
-        "estimated map for the bona fide crop, a flat one for the replay."
+        description="Relative depth of a bona fide portrait, of a synthetic replay of it and, if "
+        "given, of a photograph of it on a screen, the maps estimated from each, and the target a "
+        "depth-supervised judge trains each on: the estimated map for the bona fide crop, a flat "
+        "one for every replay."
     )
     parser.add_argument(
         "--input",
@@ -83,6 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("experiments/moire-fitted-to-msu-matched-noise.json"),
     )
+    parser.add_argument(
+        "--replay-photo",
+        type=Path,
+        help="photograph of the portrait shown on a screen, drawn as a third row: a real replay",
+    )
     parser.add_argument("--output", type=Path, default=Path("results/depth_preview.pdf"))
     parser.add_argument("--device", default="mps" if torch.backends.mps.is_available() else "cpu")
     return parser
@@ -92,17 +99,22 @@ def main() -> None:
     args = build_parser().parse_args()
     bona_fide = face_crop(read_image(args.input))
     generator = MoireRecaptureGenerator(read_fitted_config(args.generator_config))
-    crops = np.stack([bona_fide, generator.generate(bona_fide)])
+    rows = {"Bona fide": bona_fide, "Synthetic replay": generator.generate(bona_fide)}
+    if args.replay_photo:
+        rows["Real replay"] = face_crop(read_image(args.replay_photo))
+    crops = np.stack(list(rows.values()))
     estimated = DepthAnything(args.device).relative_depth(crops)
     from_landmarks = FaceModel(args.device).relative_depth(crops)
-    print_similarity("Depth Anything V2", estimated)
-    print_similarity("3DFAN-4", from_landmarks)
+    print_similarity("Depth Anything V2", estimated, list(rows))
+    print_similarity("3DFAN-4", from_landmarks, list(rows))
 
-    figure = Figure(figsize=(FIGURE_WIDTH_IN, FIGURE_HEIGHT_IN), layout="constrained")
-    axes = figure.subplots(len(ROW_TITLES), len(COLUMN_TITLES))
-    targets = (depth_target(estimated[0]), np.zeros((DEPTH_GRID, DEPTH_GRID)))
+    height = TITLE_HEIGHT_IN + ROW_HEIGHT_IN * len(rows)
+    figure = Figure(figsize=(FIGURE_WIDTH_IN, height), layout="constrained")
+    axes = figure.subplots(len(rows), len(COLUMN_TITLES))
+    flat = np.zeros((DEPTH_GRID, DEPTH_GRID))
+    targets = [depth_target(estimated[0])] + [flat] * (len(rows) - 1)
     for row_axes, crop, depth, landmarks, target, title in zip(
-        axes, crops, estimated, from_landmarks, targets, ROW_TITLES, strict=True
+        axes, crops, estimated, from_landmarks, targets, rows, strict=True
     ):
         row_axes[0].imshow(crop)
         maps = (
