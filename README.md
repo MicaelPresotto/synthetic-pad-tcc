@@ -261,11 +261,13 @@ uv run python scripts/measure_depth.py
 face of a bona fide portrait as the crops of the corpora were cut, with the face detector that
 ships with scikit-image, renders a synthetic replay of it, and shows the relative depth that
 each estimator finds in both, the maps drawn from it, and the target each crop is trained on:
-the estimated map for the bona fide face, a flat one for the replay. It also prints how close
-the relief of the replay is to that of the bona fide face.
+the estimated map for the bona fide face, a flat one for the replay. With `--replay-photo`, a
+photograph of the portrait shown on a screen joins as a third row, a real replay. It also
+prints how close the relief of each replay is to that of the bona fide face.
 
 ```bash
 uv run python scripts/preview_depth.py --input monographs/portrait-eileen-collins-nasa.png \
+  --replay-photo monographs/portrait-eileen-collins-phone-replay.jpg \
   --output monographs/fig-depth-example.pdf
 ```
 
