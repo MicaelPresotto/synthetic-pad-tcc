@@ -626,6 +626,21 @@ def paired_difference(trained: dict[int, Path], reference: dict[int, Path]) -> t
     return difference_with_interval(differences), f"{improved}/{differences.size}"
 
 
+def print_variant_differences(title: str, variant: Runs, reference: Runs) -> None:
+    """Each training configuration of a variant against the same configuration of a reference
+    detector, seed by seed."""
+    print(f"\n== {title}")
+    for source, target in DIRECTIONS:
+        for data in CONFIGURATIONS:
+            difference, improved = paired_difference(
+                variant[(source, data)], reference[(source, data)]
+            )
+            print(
+                f"  {CORPUS_NAMES[source]} -> {CORPUS_NAMES[target]}, {data:9s} cross HTER "
+                f"{difference}  improved in {improved}"
+            )
+
+
 def mixstyle_table(real: Runs, mixed: Runs, mixstyle: Runs) -> str:
     rows = []
     for source, target in DIRECTIONS:
@@ -699,8 +714,10 @@ def depth_table(one_label: Runs, variants: Sequence[tuple[str, Runs]]) -> str:
             rows.append("\t\t\\midrule")
     return table(
         "Detectors trained with one label per crop, with a depth map instead of the label, and "
-        "with a depth map beside the label as an auxiliary task, on real, synthetic and mixed "
-        "attacks, with the sinusoidal fringes and matched noise: intra-dataset and cross-dataset "
+        "with a depth map beside the label as an auxiliary task: 7 $\\times$ 7 from Depth "
+        "Anything V2 at equal weight, 14 $\\times$ 14, ten times the weight of the label, and 7 "
+        "$\\times$ 7 from a 3D face model. All on real, synthetic and mixed attacks, with the "
+        "sinusoidal fringes and matched noise: intra-dataset and cross-dataset "
         "HTER (\\%), the paired cross-dataset difference to the real detector of the same "
         "supervision and to the detector with one label trained on the same attacks, each with "
         "its 95\\% bootstrap interval, and the replay AUC. A negative difference is a lower "
@@ -1157,6 +1174,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="the same judges with the depth map as an auxiliary task beside the attack label",
     )
     parser.add_argument(
+        "--depth-variants",
+        type=Path,
+        nargs=3,
+        metavar=("GRID_14", "WEIGHT_10", "FACE_MODEL"),
+        default=[
+            Path("results/depth-14"),
+            Path("results/depth-weight10"),
+            Path("results/depth-face-model"),
+        ],
+        help="the auxiliary judges with a 14 x 14 map from layer3, with the depth loss at ten "
+        "times the weight of the label, and with targets from a 3D face model",
+    )
+    parser.add_argument(
         "--vit",
         type=Path,
         nargs=2,
@@ -1195,6 +1225,11 @@ def main() -> None:
     vit_b16, vit_b32 = (find_runs(path) for path in args.vit)
     depth = find_runs(args.depth)
     depth_auxiliary = find_runs(args.depth_auxiliary)
+    depth_variants = [
+        ("14 $\\times$ 14 map", "a 14 x 14 map", find_runs(args.depth_variants[0])),
+        ("weight 10", "the depth loss at weight 10", find_runs(args.depth_variants[1])),
+        ("3D face model", "targets from a 3D face model", find_runs(args.depth_variants[2])),
+    ]
     splits = [
         ("Original", {**real_only, ("msu", "mixed"): matched_one[("msu", "mixed")]}),
         *((f"Split {index}", find_runs(path)) for index, path in enumerate(args.msu_splits, 1)),
@@ -1242,6 +1277,7 @@ def main() -> None:
             (
                 ("\\quad depth instead of label", depth),
                 ("\\quad depth beside label", depth_auxiliary),
+                *((f"\\quad\\quad {label}", runs) for label, _, runs in depth_variants),
             ),
         ),
         "tab-splits.tex": splits_table(splits),
@@ -1285,6 +1321,12 @@ def main() -> None:
     print_paired_differences(
         "ResNet-18 with a depth map beside the label, sinusoidal, matched noise", depth_auxiliary
     )
+    for _, description, runs in depth_variants:
+        print_variant_differences(
+            f"Depth beside the label with {description}, against the 7 x 7 map at weight 1",
+            runs,
+            depth_auxiliary,
+        )
     print_spectrum_fit(calibrated)
 
 
