@@ -2,11 +2,9 @@ import argparse
 from dataclasses import asdict
 from pathlib import Path
 
-from synthetic_pad.corpora import read_msu, read_replay_mobile
+from synthetic_pad.corpora import READERS
 from synthetic_pad.dataset import WORKING_RESOLUTION, write_manifest
 from synthetic_pad.frames import FACE_CROP_SCALE, FRAMES_PER_VIDEO, extract_corpus
-
-READERS = {"msu": read_msu, "replay-mobile": read_replay_mobile}
 
 
 def build_parser() -> argparse.ArgumentParser:

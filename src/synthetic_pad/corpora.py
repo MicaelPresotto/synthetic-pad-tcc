@@ -73,6 +73,9 @@ def read_replay_mobile(root: Path) -> list[Recording]:
     return recordings
 
 
+READERS = {"msu": read_msu, "replay-mobile": read_replay_mobile}
+
+
 def _subject_list(path: Path) -> list[str]:
     return [f"{int(token):03d}" for token in path.read_text().split()]
 

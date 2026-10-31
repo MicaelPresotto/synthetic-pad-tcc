@@ -291,6 +291,20 @@ the EAR series are kept in `results/blinks/` and reused.
 uv run python scripts/measure_blinks.py
 ```
 
+`measure_pulse.py` asks the same of the pulse. Each heartbeat darkens the skin a little, most
+in green, and remote photoplethysmography (rPPG) reads it from the mean color of the skin over
+time. With no training, it takes the first nine seconds of every video of both corpora, the
+mean RGB of the central 60% of the annotated face box in each frame, and the POS signal of
+Wang et al. (2017). The attack score is one minus the share of the 0.7–4 Hz band power held by
+the strongest peak and the frequencies beside it, low when a pulse stands out. The report
+follows as for the blinks, with the share of videos whose peak falls at a resting heart rate.
+The band spectra of every partition, training included, are kept in `results/pulse/` and
+reused.
+
+```bash
+uv run python scripts/measure_pulse.py
+```
+
 `explain_judge.py` shows where a trained judge looks. It computes Grad-CAM of the
 attack logit over the test crops of both corpora, split by species, together with one
 synthetic replay rendered from each bona fide test crop. It writes `attention.json`
