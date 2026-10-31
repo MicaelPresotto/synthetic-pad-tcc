@@ -257,6 +257,17 @@ flat; an estimator that reads depth from the image may not.
 uv run python scripts/measure_depth.py
 ```
 
+`preview_depth.py` draws the example figure of the depth section in the thesis. It cuts the
+face of a bona fide portrait as the crops of the corpora were cut, with the face detector that
+ships with scikit-image, renders a synthetic replay of it, and shows the relative depth that
+each estimator finds in both, with the maps a depth-supervised judge would train on. It also
+prints how close the relief of the replay is to that of the bona fide face.
+
+```bash
+uv run python scripts/preview_depth.py --input monographs/portrait-eileen-collins-nasa.png \
+  --output monographs/fig-depth-example.pdf
+```
+
 ```bash
 uv run python scripts/estimate_depth.py
 uv run python scripts/train_judge.py --train-corpus msu --data mixed --depth-maps data/depth \
