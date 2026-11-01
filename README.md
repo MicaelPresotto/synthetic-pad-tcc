@@ -305,6 +305,15 @@ reused.
 uv run python scripts/measure_pulse.py
 ```
 
+Both scripts also score two synthetic replays of each bona fide test video, made by the
+generator fitted to its corpus (`experiments/moire-fitted-to-*-matched-noise.json`) on every
+full frame. The question is whether a synthetic replay keeps the blinks and the pulse of the
+face it shows, as a recorded video replay does. In the first, every frame of a video goes
+through one screen, camera and tone, drawn once from the video name, and only the sensor noise
+changes from frame to frame. In the second, every frame draws its own, as the generator does
+for single images. They get rows of their own in the report, stay out of its "all attacks"
+figures, and are kept in `<corpus>-synthetic.json` beside the recorded videos.
+
 `explain_judge.py` shows where a trained judge looks. It computes Grad-CAM of the
 attack logit over the test crops of both corpora, split by species, together with one
 synthetic replay rendered from each bona fide test crop. It writes `attention.json`

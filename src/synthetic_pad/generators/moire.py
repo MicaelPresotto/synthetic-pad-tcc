@@ -123,9 +123,12 @@ class MoireRecaptureGenerator(AttackGenerator):
     def __init__(self, config: MoireConfig | None = None) -> None:
         self._config = config if config is not None else MoireConfig()
 
-    def generate(self, image: RgbImage) -> RgbImage:
+    def generate(self, image: RgbImage, scene: int | None = None) -> RgbImage:
+        """Images of one scene, the frames of one video, share the screen, camera and tone it
+        draws; only the sensor noise still follows each image."""
         ensure_rgb_uint8(image)
-        rng = np.random.default_rng([self._config.seed, content_digest(image)])
+        image_rng = np.random.default_rng([self._config.seed, content_digest(image)])
+        rng = image_rng if scene is None else np.random.default_rng([self._config.seed, scene])
         canvas: FloatImage = image.astype(np.float64) / 255.0
         canvas = self._apply_geometry(canvas, rng)
         canvas = self._apply_tone(canvas, rng)
@@ -133,7 +136,7 @@ class MoireRecaptureGenerator(AttackGenerator):
         canvas = self._apply_glare(canvas, rng)
         canvas = self._apply_lens(canvas)
         canvas = self._apply_moire(canvas, rng)
-        canvas = self._apply_noise(canvas, rng, image)
+        canvas = self._apply_noise(canvas, image_rng, image)
         return _quantise_to_uint8(canvas)
 
     def add_sensor_noise(self, image: RgbImage) -> RgbImage:

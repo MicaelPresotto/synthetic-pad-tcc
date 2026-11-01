@@ -146,6 +146,28 @@ class TestOutputContract:
         assert np.abs(first - second).mean() > 1.0
 
 
+class TestScene:
+    def test_images_of_one_scene_share_the_pattern(self, face_like_image: RgbImage) -> None:
+        generator = MoireRecaptureGenerator(dataclasses.replace(NEUTRAL, moire_amplitude=0.25))
+        flat = np.full_like(face_like_image, 128)
+        shifted = flat.copy()
+        shifted[0, 0, 0] = 129
+
+        first = generator.generate(flat, scene=1)
+        second = generator.generate(shifted, scene=1)
+        assert np.count_nonzero(first != second) <= 1
+
+    def test_the_noise_still_follows_each_image(self, face_like_image: RgbImage) -> None:
+        generator = MoireRecaptureGenerator(dataclasses.replace(NEUTRAL, noise_sigma_levels=4.0))
+        flat = np.full_like(face_like_image, 128)
+        shifted = flat.copy()
+        shifted[0, 0, 0] = 129
+
+        first = generator.generate(flat, scene=1)
+        second = generator.generate(shifted, scene=1)
+        assert np.count_nonzero(first != second) > first.size // 2
+
+
 class TestArtifacts:
     def test_the_neutral_config_is_the_identity(self, face_like_image: RgbImage) -> None:
         attack = MoireRecaptureGenerator(NEUTRAL).generate(face_like_image)
