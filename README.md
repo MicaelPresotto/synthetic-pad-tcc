@@ -271,6 +271,22 @@ uv run python scripts/preview_depth.py --input monographs/portrait-eileen-collin
   --output monographs/fig-depth-example.pdf
 ```
 
+`preview_generator.py` draws the example figures of the generator in the thesis, on the face of
+the same portrait, cut as the crops of the corpora were: the stages switched on one at a time,
+three draws of the first generator beside three of the calibrated one, the camera noise of the
+calibrated generator against the matched noise with the fine detail amplified, and the drawn
+fringes beside the simulated screen and the spectral transfer. The first generator is no longer
+the code on `main`, so its draws are rendered by `first_generator_draws.py` with the package of
+a worktree of the tag `first-generator`. The photograph of the portrait on a phone screen stands
+in for a real replay, and the spectral transfer takes its spectrum from it.
+
+```bash
+git worktree add ../first-generator first-generator
+uv run python scripts/preview_generator.py --input monographs/portrait-eileen-collins-nasa.png \
+  --replay-photo monographs/portrait-eileen-collins-phone-replay.jpg --mirror-replay-photo \
+  --output-dir monographs
+```
+
 ```bash
 uv run python scripts/estimate_depth.py
 uv run python scripts/train_judge.py --train-corpus msu --data mixed --depth-maps data/depth \

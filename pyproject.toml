@@ -69,6 +69,7 @@ select = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]  # asserts are the point in tests
+"scripts/preview_generator.py" = ["S603"]  # runs the first generator from its own checkout, with fixed arguments
 
 [tool.mypy]
 python_version = "3.12"

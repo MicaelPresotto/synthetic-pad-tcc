@@ -7,6 +7,8 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from skimage.data import lbp_frontal_face_cascade_filename
+from skimage.feature import Cascade
 
 from synthetic_pad.corpora import BONA_FIDE, FaceBox, Recording
 from synthetic_pad.dataset import MANIFEST_NAME, WORKING_RESOLUTION, read_image, write_image
@@ -14,6 +16,8 @@ from synthetic_pad.domain import RgbImage
 
 FRAMES_PER_VIDEO = 10
 FACE_CROP_SCALE = 1.4
+DETECTION_SCALE_FACTOR = 1.2
+SMALLEST_FACE_PX = 60
 CORPORA = ("msu", "replay-mobile")
 MSU_DEVELOPMENT_SUBJECTS = 5
 MSU_SPLIT_SEED = 20260928
@@ -59,6 +63,24 @@ def square_face_crop(frame: RgbImage, box: FaceBox, scale: float) -> RgbImage:
     left = min(max(left, 0), width - side)
     top = min(max(top, 0), height - side)
     return np.ascontiguousarray(frame[top : top + side, left : left + side])
+
+
+def face_crop(image: RgbImage) -> RgbImage:
+    """The largest face found, cut and resized as the crops of the corpora were."""
+    faces = Cascade(lbp_frontal_face_cascade_filename()).detect_multi_scale(
+        img=image,
+        scale_factor=DETECTION_SCALE_FACTOR,
+        step_ratio=1,
+        min_size=(SMALLEST_FACE_PX, SMALLEST_FACE_PX),
+        max_size=image.shape[:2],
+    )
+    if not faces:
+        raise ValueError("no face found in the input image")
+    face = max(faces, key=lambda found: found["width"] * found["height"])
+    box = (face["c"], face["r"], face["width"], face["height"])
+    crop = square_face_crop(image, box, FACE_CROP_SCALE)
+    size = (WORKING_RESOLUTION, WORKING_RESOLUTION)
+    return np.asarray(cv2.resize(crop, size, interpolation=cv2.INTER_AREA))
 
 
 def face_cells(grid: int, scale: float) -> np.ndarray:

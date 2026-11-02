@@ -3,8 +3,10 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytest
+from skimage.data import astronaut
 
 from synthetic_pad.corpora import BONA_FIDE, REPLAY, Recording
+from synthetic_pad.dataset import WORKING_RESOLUTION
 from synthetic_pad.domain import RgbImage
 from synthetic_pad.frames import (
     DAMAGE_DISTANCE_RATIO,
@@ -12,6 +14,7 @@ from synthetic_pad.frames import (
     damage_measures,
     evenly_spaced,
     extract_corpus,
+    face_crop,
     flat_block_fraction,
     hold_out_subjects,
     is_damaged,
@@ -34,6 +37,15 @@ def write_video(path: Path, frames: int, height: int = 120, width: int = 160) ->
 def recording(video: Path, frames: int, species: str = BONA_FIDE) -> Recording:
     boxes = dict.fromkeys(range(frames), (40, 30, 60, 60))
     return Recording("test", video, "train", "001", species, boxes)
+
+
+class TestFaceCrop:
+    def test_cuts_the_face_at_the_working_resolution(self) -> None:
+        assert face_crop(astronaut()).shape == (WORKING_RESOLUTION, WORKING_RESOLUTION, 3)
+
+    def test_rejects_an_image_without_a_face(self) -> None:
+        with pytest.raises(ValueError, match="no face"):
+            face_crop(np.full((128, 128, 3), 128, dtype=np.uint8))
 
 
 class TestSquareFaceCrop:

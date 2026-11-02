@@ -2,24 +2,18 @@ import argparse
 from collections.abc import Sequence
 from pathlib import Path
 
-import cv2
 import numpy as np
 import torch
 from matplotlib.figure import Figure
-from skimage.data import lbp_frontal_face_cascade_filename
-from skimage.feature import Cascade
 
 from synthetic_pad.calibration import read_fitted_config
-from synthetic_pad.dataset import WORKING_RESOLUTION, read_image
+from synthetic_pad.dataset import read_image
 from synthetic_pad.depth import DEPTH_GRID, depth_target, face_prominence, shape_similarity
 from synthetic_pad.depth_estimation import DepthAnything, FaceModel
-from synthetic_pad.domain import RgbImage
-from synthetic_pad.frames import FACE_CROP_SCALE, square_face_crop
+from synthetic_pad.frames import face_crop
 from synthetic_pad.generators.moire import MoireRecaptureGenerator
 
 FINE_GRID = 14
-DETECTION_SCALE_FACTOR = 1.2
-SMALLEST_FACE_PX = 60
 FIGURE_WIDTH_IN = 6.3
 TITLE_HEIGHT_IN = 0.2
 ROW_HEIGHT_IN = 1.2
@@ -33,24 +27,6 @@ COLUMN_TITLES = (
     r"3DFAN-4, 7$\times$7",
     "Training target",
 )
-
-
-def face_crop(image: RgbImage) -> RgbImage:
-    """The largest face found, cut and resized as the crops of the corpora were."""
-    faces = Cascade(lbp_frontal_face_cascade_filename()).detect_multi_scale(
-        img=image,
-        scale_factor=DETECTION_SCALE_FACTOR,
-        step_ratio=1,
-        min_size=(SMALLEST_FACE_PX, SMALLEST_FACE_PX),
-        max_size=image.shape[:2],
-    )
-    if not faces:
-        raise ValueError("no face found in the input image")
-    face = max(faces, key=lambda found: found["width"] * found["height"])
-    box = (face["c"], face["r"], face["width"], face["height"])
-    crop = square_face_crop(image, box, FACE_CROP_SCALE)
-    size = (WORKING_RESOLUTION, WORKING_RESOLUTION)
-    return np.asarray(cv2.resize(crop, size, interpolation=cv2.INTER_AREA))
 
 
 def unit_range(depth: np.ndarray) -> np.ndarray:
