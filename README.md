@@ -314,6 +314,16 @@ changes from frame to frame. In the second, every frame draws its own, as the ge
 for single images. They get rows of their own in the report, stay out of its "all attacks"
 figures, and are kept in `<corpus>-synthetic.json` beside the recorded videos.
 
+`preview_video_replay.py` draws the example figure of the video replay section in the thesis.
+It sways a bona fide portrait a few pixels to and fro, as a head moves in front of a camera,
+recaptures the clip both ways, and draws the first frames of each with the brightness of the
+center of every frame. It also prints how much that brightness changes between frames.
+
+```bash
+uv run python scripts/preview_video_replay.py --input monographs/portrait-eileen-collins-nasa.png \
+  --output monographs/fig-video-replay.pdf
+```
+
 `explain_judge.py` shows where a trained judge looks. It computes Grad-CAM of the
 attack logit over the test crops of both corpora, split by species, together with one
 synthetic replay rendered from each bona fide test crop. It writes `attention.json`
@@ -358,7 +368,8 @@ synthetic-per-bona-fide ratios (`results/fraction-0.1`, `-0.25`, `-0.5`, `result
 `-5`; each folder's ratio is read from its reports), the matched-noise and screen runs
 (`results/matched-noise-fraction-1`, `results/matched-noise-copies-3`,
 `results/screen-best-fraction-1`, `results/screen-best-copies-3`), the depth-supervised runs
-(`results/depth`, `results/depth-auxiliary`), the first-generator runs of
+(`results/depth`, `results/depth-auxiliary`), the reports of `measure_blinks.py` and
+`measure_pulse.py` (`results/blinks`, `results/pulse`), the first-generator runs of
 `results/judges` and the calibration reports, and writes the `.tex` tables and `.pdf`
 figures into `monographs/`. The composition table counts the face crops of each
 partition in `data/frames`, so the crops of `extract_frames.py` must be in place. `ablate_generator.py` writes the `ablation.json` behind the

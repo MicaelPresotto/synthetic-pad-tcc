@@ -1,7 +1,7 @@
 import argparse
 import json
 from collections import Counter, defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -18,11 +18,14 @@ from synthetic_pad.evaluation.metrics import (
     classification_metrics,
 )
 from synthetic_pad.frames import FRAMES_PER_VIDEO, CropSample, load_partitions, select
+from synthetic_pad.video_scores import SYNTHETIC_REPLAYS
 
 CORPUS_NAMES = {"msu": "MSU-MFSD", "replay-mobile": "Replay-Mobile"}
 DIRECTIONS = (("msu", "replay-mobile"), ("replay-mobile", "msu"))
 CONFIGURATIONS = ("real", "synthetic", "mixed")
 SPECIES = ("replay", "print")
+MOTION_CUES = ("blinks", "pulse")
+RECORDED_KINDS = (PRINT, "replay of a photo", "replay of a video")
 STAGES = ("geometry", "tone", "glare", "lens", "moire", "noise")
 TONE_STATISTICS = ("saturation", "contrast", "black_level", "white_level", "sharpness")
 GENERATED = "generated"
@@ -830,6 +833,35 @@ def relative_statistics(section: dict[str, Any]) -> dict[str, dict[str, Any]]:
     }
 
 
+def motion_table(reports: Mapping[str, Report]) -> str:
+    def row(kind: str) -> str:
+        cells = [
+            f"{species[kind]['auc']:.3f}" if kind in species else NOT_RUN
+            for species in (
+                reports[cue][f"{corpus} intra"]["by_species"]
+                for cue in MOTION_CUES
+                for corpus in CORPUS_NAMES
+            )
+        ]
+        return "\t\t" + " & ".join([kind.capitalize(), *cells]) + " \\\\"
+
+    return table(
+        "AUC of the blink and the pulse scores, which need no training, on the test videos of "
+        "each dataset, for each kind of attack against the bona fide videos. The synthetic "
+        "replays are rendered from every bona fide test video by the generator with matched "
+        "noise of its dataset, with one screen for the whole video or a new screen in every "
+        "frame. An AUC of 0.5 is chance, and below it the attacks look more alive than the "
+        "bona fide videos.",
+        "tab:motion",
+        "l" + CENTRED_X * 4,
+        "& \\multicolumn{2}{c}{\\textbf{Blinks}} & \\multicolumn{2}{c}{\\textbf{Pulse}} \\\\\n"
+        "\t\t\\cmidrule(lr){2-3} \\cmidrule(lr){4-5}\n"
+        "\t\t\\textbf{Attack} & \\textbf{MSU-MFSD} & \\textbf{Replay-Mobile} & "
+        "\\textbf{MSU-MFSD} & \\textbf{Replay-Mobile}",
+        [*map(row, RECORDED_KINDS), "\t\t\\midrule", *map(row, SYNTHETIC_REPLAYS)],
+    )
+
+
 def calibration_table(first_generator: dict[str, Any]) -> str:
     rows = []
     for corpus, name in CORPUS_NAMES.items():
@@ -1219,6 +1251,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=[Path("results/calibration.json"), Path("results/calibration-fitted-rm.json")],
         help="calibration reports of the generator fitted to each dataset",
     )
+    parser.add_argument(
+        "--motion-cues",
+        type=Path,
+        nargs=2,
+        metavar=("BLINKS", "PULSE"),
+        default=[Path("results/blinks"), Path("results/pulse")],
+        help="folders of the reports of measure_blinks.py and measure_pulse.py",
+    )
     parser.add_argument("--output", type=Path, default=Path("monographs"))
     return parser
 
@@ -1250,6 +1290,10 @@ def main() -> None:
     calibrated = {
         corpus: json.loads(path.read_text())
         for corpus, path in zip(CORPUS_NAMES, args.calibration, strict=True)
+    }
+    motion_reports = {
+        cue: json.loads((folder / "report.json").read_text())
+        for cue, folder in zip(MOTION_CUES, args.motion_cues, strict=True)
     }
     args.output.mkdir(parents=True, exist_ok=True)
     outputs = {
@@ -1293,6 +1337,7 @@ def main() -> None:
         ),
         "tab-splits.tex": splits_table(splits),
         "tab-calibration.tex": calibration_table(first_generator),
+        "tab-motion.tex": motion_table(motion_reports),
     }
     for name, content in outputs.items():
         (args.output / name).write_text(content)
