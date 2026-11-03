@@ -164,9 +164,9 @@ def composition_table(partitions: dict[str, list[CropSample]]) -> str:
         if corpus != list(partitions)[-1]:
             rows.append("\t\t\\midrule")
     return table(
-        f"Number of face crops in each partition, {FRAMES_PER_VIDEO} per video: the training set "
-        "of each configuration, with as many synthetic replay attacks as bona fide training "
-        "crops, and the development and test partitions, which hold the same real crops in "
+        f"Number of face crops in each partition, {FRAMES_PER_VIDEO} per video. The training set "
+        "of each configuration holds as many synthetic replay attacks as bona fide training "
+        "crops, and the development and test partitions hold the same real crops in "
         "every configuration. "
         "The last column is the share of the attacks that are synthetic (\\%).",
         "tab:composition",
@@ -226,7 +226,8 @@ def main_table(runs: Runs) -> str:
         "tab:main",
         "Xccccc",
         "\\textbf{Attacks} & \\textbf{HTER intra} & "
-        "\\textbf{HTER cross} & \\textbf{AUC cross} & \\textbf{AUC replay} & \\textbf{AUC print}",
+        "\\textbf{HTER cross} & \\textbf{AUC cross} & \\textbf{AUC replay cross} & "
+        "\\textbf{AUC print cross}",
         rows,
     )
 
@@ -274,7 +275,7 @@ def metrics_table(runs: Runs) -> str:
             rows.append("\t\t\\midrule")
     return table(
         "PAD and general classification metrics (\\%) at the development threshold, with the "
-        "attack as the positive class: mean over ten seeds.",
+        "attack as the positive class. Mean over ten seeds.",
         "tab:metrics",
         "ll" + CENTRED_X * len(columns),
         "\\textbf{Attacks} & \\textbf{Test} & \\textbf{APCER replay} & "
@@ -320,7 +321,7 @@ def threshold_table(runs: Runs) -> str:
     target = f"{100 * TARGET_BPCER:.0f}\\%"
     return table(
         "Error rates (\\%) under two threshold rules: the equal-error (EER) threshold of the "
-        "development set, and the threshold that rejects at most "
+        "development partition, and the threshold that rejects at most "
         f"{target} of the development bona fide crops, set without looking at any attack. "
         "Mean over ten seeds.",
         "tab:threshold",
@@ -370,8 +371,10 @@ def noise_table(noise_on: Runs, noise_off: Runs, noise_on_real_crops: Runs) -> s
     return table(
         "Cross-dataset HTER (\\%) and replay AUC with the noise stage of the generator on, as in "
         "Table~\\ref{tab:main}, switched off, and applied to every real training crop as well, so "
-        "that the noise level no longer tells the classes apart; the last column uses the "
-        f"BPCER {target} threshold of Table~\\ref{{tab:threshold}}. Mean over ten seeds.",
+        "that the noise level no longer tells the classes apart; the last column repeats the "
+        f"condition with noise on every real crop, evaluated at the BPCER {target} threshold of "
+        "Table~\\ref{tab:threshold}, and the replay AUC is given for the first and the third "
+        "condition only. Mean over ten seeds.",
         "tab:noise",
         "l" + CENTRED_X * 6,
         "& \\multicolumn{3}{c}{\\textbf{HTER cross}} & "
@@ -481,7 +484,7 @@ def noise_ablation_table(noise_on: Runs, noise_on_real_crops: Runs) -> str:
         rows.append("\t\t" + " & ".join([title, *cells]) + " \\\\")
     return table(
         "Median score of the calibrated synthetic detectors on attacks rendered from the bona fide "
-        "test crops of their own dataset, with one stage switched on or off: median over ten "
+        "test crops of their own dataset, with one stage switched on or off. Median over ten "
         "seeds, with the range across seeds.",
         "tab:ablation-noise",
         "Xcccc",
@@ -591,9 +594,10 @@ def architectures_table(architectures: Sequence[tuple[str, Runs]]) -> str:
     measures = " & ".join(
         ["\\textbf{HTER intra} & \\textbf{HTER cross} & \\textbf{AUC replay}"] * len(architectures)
     )
-    names = ", ".join(title for title, _ in architectures[:-1]) + f" and the {architectures[-1][0]}"
+    names = ", ".join(f"the {title}" for title, _ in architectures[:-1])
+    names += f" and the {architectures[-1][0]}"
     return table(
-        f"Intra-dataset HTER (\\%), cross-dataset HTER (\\%) and replay AUC of the {names} "
+        f"Intra-dataset HTER (\\%), cross-dataset HTER (\\%) and replay AUC of {names} "
         "trained on real, synthetic and mixed attacks, with the sinusoidal fringes and matched "
         "noise. Mean over ten seeds.",
         "tab:architectures",
@@ -619,7 +623,12 @@ def cross_hter_differences(trained: dict[int, Path], reference: dict[int, Path])
 
 def difference_with_interval(differences: np.ndarray) -> str:
     low, high = bootstrap_interval(differences)
-    return f"${differences.mean():+.1f}$ [${low:+.1f}$, ${high:+.1f}$]"
+    return f"${signed(differences.mean())}$ [${signed(low)}$, ${signed(high)}$]"
+
+
+def signed(value: float) -> str:
+    """One decimal with its sign; adding 0.0 turns a rounded -0.0 into +0.0."""
+    return f"{round(value, 1) + 0.0:+.1f}"
 
 
 def paired_difference(trained: dict[int, Path], reference: dict[int, Path]) -> tuple[str, str]:
@@ -725,8 +734,8 @@ def depth_table(one_label: Runs, variants: Sequence[tuple[str, Runs]]) -> str:
             "cross-dataset HTER (\\%), the paired cross-dataset difference to the real detector "
             "of the same supervision and to the detector with one label trained on the same "
             "attacks, each with its 95\\% bootstrap interval, and the replay AUC. A negative "
-            "difference is a lower error than that of the detector compared with. Mean over ten "
-            f"seeds, {direction}."
+            "difference is a lower error than that of the detector it is compared with. Mean over "
+            f"ten seeds, {direction}."
             if source == DIRECTIONS[0][0]
             else f"As Table~\\ref{{{first_label}}}, {direction}."
         )
