@@ -6,12 +6,11 @@ import numpy as np
 import torch
 from matplotlib.figure import Figure
 
-from synthetic_pad.calibration import read_fitted_config
 from synthetic_pad.dataset import read_image
 from synthetic_pad.depth import DEPTH_GRID, depth_target, face_prominence, shape_similarity
 from synthetic_pad.depth_estimation import DepthAnything, FaceModel
 from synthetic_pad.frames import face_crop
-from synthetic_pad.generators.moire import MoireRecaptureGenerator
+from synthetic_pad.generators.moire import MoireRecaptureGenerator, read_fitted_config
 
 FINE_GRID = 14
 FIGURE_WIDTH_IN = 6.3

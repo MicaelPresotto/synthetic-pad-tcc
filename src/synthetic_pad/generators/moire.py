@@ -1,7 +1,9 @@
+import json
 import math
 import warnings
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
 import cv2
@@ -115,6 +117,10 @@ class MoireConfig:
                 "require 0 <= black_level < white_level <= 1, got "
                 f"black_level={self.black_level}, white_level={self.white_level}"
             )
+
+
+def read_fitted_config(path: Path) -> MoireConfig:
+    return MoireConfig(**json.loads(path.read_text())["config"])
 
 
 class MoireRecaptureGenerator(AttackGenerator):

@@ -8,15 +8,10 @@ from typing import Any
 
 import numpy as np
 
-from synthetic_pad.calibration import (
-    CHROMA_BANDS,
-    appearance,
-    appearance_distance,
-    read_fitted_config,
-)
+from synthetic_pad.calibration import CHROMA_BANDS, appearance, appearance_distance
 from synthetic_pad.corpora import BONA_FIDE, CORPORA, REPLAY, TRAIN
 from synthetic_pad.frames import CropSample, load_partitions, read_crops, select
-from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
+from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator, read_fitted_config
 
 GENERATED = "generated"
 SEARCH_SPACE = {

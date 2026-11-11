@@ -1,12 +1,19 @@
 import dataclasses
+import json
 import warnings
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
 
 from synthetic_pad.domain import RgbImage
-from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator, noise_level
+from synthetic_pad.generators.moire import (
+    MoireConfig,
+    MoireRecaptureGenerator,
+    noise_level,
+    read_fitted_config,
+)
 
 NEUTRAL = MoireConfig(
     tilt_x=0.0,
@@ -440,3 +447,11 @@ class TestFringeResolution:
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             MoireRecaptureGenerator().generate(face_like_image)
+
+
+class TestReadFittedConfig:
+    def test_reads_back_the_settings_a_fit_wrote(self, tmp_path: Path) -> None:
+        fitted = dataclasses.replace(MoireConfig(), saturation=1.3, moire_amplitude=0.07)
+        path = tmp_path / "fitted.json"
+        path.write_text(json.dumps({"distance": 0.1, "config": dataclasses.asdict(fitted)}))
+        assert read_fitted_config(path) == fitted

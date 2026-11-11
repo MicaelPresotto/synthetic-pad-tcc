@@ -10,11 +10,10 @@ import numpy as np
 from ablate_generator import switched_off
 from matplotlib.figure import Figure
 
-from synthetic_pad.calibration import read_fitted_config
 from synthetic_pad.dataset import read_image
 from synthetic_pad.domain import RgbImage
 from synthetic_pad.frames import face_crop
-from synthetic_pad.generators.moire import MoireRecaptureGenerator, noise_level
+from synthetic_pad.generators.moire import MoireRecaptureGenerator, noise_level, read_fitted_config
 from synthetic_pad.generators.spectral import SpectralTransferGenerator
 
 SCENE = 1

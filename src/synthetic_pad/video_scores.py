@@ -12,11 +12,10 @@ from typing import Any
 
 import numpy as np
 
-from synthetic_pad.calibration import read_fitted_config
 from synthetic_pad.corpora import BONA_FIDE, CORPORA, DEVELOPMENT, READERS, REPLAY, TEST, Recording
 from synthetic_pad.domain import RgbImage
 from synthetic_pad.evaluation.report import pad_report
-from synthetic_pad.generators.moire import MoireRecaptureGenerator
+from synthetic_pad.generators.moire import MoireRecaptureGenerator, read_fitted_config
 
 SYNTHETIC_REPLAYS = ("synthetic, one screen", "synthetic, screen per frame")
 GENERATOR_CONFIGS = {

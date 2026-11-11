@@ -6,10 +6,9 @@ import cv2
 import numpy as np
 from matplotlib.figure import Figure
 
-from synthetic_pad.calibration import read_fitted_config
 from synthetic_pad.dataset import read_image
 from synthetic_pad.domain import RgbImage
-from synthetic_pad.generators.moire import MoireRecaptureGenerator
+from synthetic_pad.generators.moire import MoireRecaptureGenerator, read_fitted_config
 
 SWAY_PX = 4.0
 SHOWN_FRAMES = 4

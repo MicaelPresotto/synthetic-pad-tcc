@@ -1,17 +1,14 @@
 """Image statistics for matching generated attacks to real ones."""
 
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
-from pathlib import Path
 from typing import Any
 
 import cv2
 import numpy as np
 
 from synthetic_pad.domain import LUMA_WEIGHTS, RgbImage, ensure_rgb_uint8
-from synthetic_pad.generators.moire import MoireConfig
 
 type BandPowers = np.ndarray[Any, np.dtype[np.float64]]
 type Crops = np.ndarray[Any, np.dtype[np.uint8]]
@@ -88,7 +85,3 @@ def appearance_distance(generated: Appearance, real: Appearance) -> float:
     ]
     colour_gaps = np.log(generated.chroma_power / real.chroma_power)
     return float((np.mean(np.square(tone_gaps)) + np.mean(np.square(colour_gaps))) / 2.0)
-
-
-def read_fitted_config(path: Path) -> MoireConfig:
-    return MoireConfig(**json.loads(path.read_text())["config"])
