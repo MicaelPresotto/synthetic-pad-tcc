@@ -110,7 +110,7 @@ def parse_sweep(spec: str) -> tuple[str, list[float]]:
     if not field_name or len(parts) != 3:
         raise ValueError(f"expected FIELD=START:STOP:STEPS, got {spec!r}")
 
-    known = {f.name for f in dataclasses.fields(MoireConfig)} - {"seed"}
+    known = {field.name for field in dataclasses.fields(MoireConfig)} - {"seed"}
     if field_name not in known:
         raise ValueError(f"{field_name!r} is not a sweepable MoireConfig field")
 
@@ -119,7 +119,7 @@ def parse_sweep(spec: str) -> tuple[str, list[float]]:
         raise ValueError(f"a sweep needs at least 2 steps, got {steps}")
     is_integer_field = isinstance(getattr(DEFAULTS, field_name), int)
     values = [start + (stop - start) * i / (steps - 1) for i in range(steps)]
-    return field_name, [round(v) if is_integer_field else v for v in values]
+    return field_name, [round(value) if is_integer_field else value for value in values]
 
 
 def build_parser() -> argparse.ArgumentParser:

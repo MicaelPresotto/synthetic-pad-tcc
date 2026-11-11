@@ -61,7 +61,9 @@ def bpcer_threshold(bonafide_scores: FloatArray, target_bpcer: float) -> float:
     if not 0.0 <= target_bpcer <= 1.0:
         raise ValueError(f"target_bpcer must lie in [0, 1], got {target_bpcer}")
     observed = np.unique(bonafide_scores)
-    within = np.flatnonzero([bpcer(bonafide_scores, t) <= target_bpcer for t in observed])
+    within = np.flatnonzero(
+        [bpcer(bonafide_scores, threshold) <= target_bpcer for threshold in observed]
+    )
     if within.size == 0:
         return float(np.inf)
     lowest = within[0]
@@ -109,8 +111,8 @@ def _operating_curve(
     attack_scores: FloatArray, bonafide_scores: FloatArray
 ) -> tuple[FloatArray, FloatArray, FloatArray]:
     thresholds = _candidate_thresholds(attack_scores, bonafide_scores)
-    apcer_at_each = np.array([apcer(attack_scores, t) for t in thresholds])
-    bpcer_at_each = np.array([bpcer(bonafide_scores, t) for t in thresholds])
+    apcer_at_each = np.array([apcer(attack_scores, threshold) for threshold in thresholds])
+    bpcer_at_each = np.array([bpcer(bonafide_scores, threshold) for threshold in thresholds])
     return thresholds, apcer_at_each, bpcer_at_each
 
 

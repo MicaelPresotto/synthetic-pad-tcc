@@ -241,11 +241,11 @@ def main_table(runs: Runs) -> str:
 def partition_scores(run: Path, partition: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Attack scores, bona fide scores and the species of each attack."""
     scores = json.loads((run / "scores.json").read_text())[partition]
-    attacks = [s for s in scores if s["species"] != BONA_FIDE]
+    attacks = [crop for crop in scores if crop["species"] != BONA_FIDE]
     return (
-        np.array([s["score"] for s in attacks]),
-        np.array([s["score"] for s in scores if s["species"] == BONA_FIDE]),
-        np.array([s["species"] for s in attacks]),
+        np.array([crop["score"] for crop in attacks]),
+        np.array([crop["score"] for crop in scores if crop["species"] == BONA_FIDE]),
+        np.array([crop["species"] for crop in attacks]),
     )
 
 
@@ -270,7 +270,9 @@ def metrics_table(runs: Runs) -> str:
             for scenario in ("intra", "cross"):
                 trained = runs[(source, data)].values()
                 per_seed = [scenario_metrics(run, scenario) for run in trained]
-                means = [100 * np.mean([m[column] for m in per_seed]) for column in columns]
+                means = [
+                    100 * np.mean([metrics[column] for metrics in per_seed]) for column in columns
+                ]
                 cells = [
                     data.capitalize() if scenario == "intra" else "",
                     scenario.capitalize(),
@@ -624,7 +626,7 @@ def cross_hter_differences(trained: dict[int, Path], reference: dict[int, Path])
     """Cross-dataset HTER of each trained run minus its reference of the same seed, in points."""
     seeds = sorted(set(reference) & set(trained))
     pick = on_report(hter_of("cross"))
-    return 100.0 * np.array([pick(trained[s]) - pick(reference[s]) for s in seeds])
+    return 100.0 * np.array([pick(trained[seed]) - pick(reference[seed]) for seed in seeds])
 
 
 def difference_with_interval(differences: np.ndarray) -> str:
@@ -918,7 +920,10 @@ def seeds_figure(runs: Runs, path: Path) -> None:
             spread = np.linspace(-0.12, 0.12, values.size)
             axis.scatter(position + spread, values, s=14, color=SERIES_COLOURS[0], zorder=3)
             axis.hlines(values.mean(), position - 0.25, position + 0.25, color=INK, linewidth=2)
-        axis.set_xticks(range(len(CONFIGURATIONS)), [d.capitalize() for d in CONFIGURATIONS])
+        axis.set_xticks(
+            range(len(CONFIGURATIONS)),
+            [configuration.capitalize() for configuration in CONFIGURATIONS],
+        )
         axis.set_title(f"{CORPUS_NAMES[source]} → {CORPUS_NAMES[target]}", fontsize=9, color=INK)
         style(axis)
     axes[0].set_ylabel("Cross-dataset HTER (%)", fontsize=8, color=INK)
@@ -946,7 +951,9 @@ def threshold_shift_figure(runs: Runs, path: Path) -> int:
     run = runs[(source, "real")][seed]
     scenarios = (("intra", source), ("cross", target))
     groups = {scenario: partition_scores(run, scenario)[:2] for scenario, _ in scenarios}
-    every_score = log_odds(np.concatenate([s for pair in groups.values() for s in pair]))
+    every_score = log_odds(
+        np.concatenate([class_scores for pair in groups.values() for class_scores in pair])
+    )
     edges = np.arange(
         np.floor(every_score.min()),
         np.ceil(every_score.max()) + LOG_ODDS_BIN_WIDTH,
@@ -1043,7 +1050,9 @@ def print_ratio_curves(
     print("\n== fig-ratio: mean and standard deviation over the seeds")
     print("  ratios " + "  ".join(f"{ratio:g}" for ratio in ratios))
     for (source, title, data), (mean, std) in curves.items():
-        cells = "  ".join(f"{m:.3f}±{s:.3f}" for m, s in zip(mean, std, strict=True))
+        cells = "  ".join(
+            f"{average:.3f}±{spread:.3f}" for average, spread in zip(mean, std, strict=True)
+        )
         print(f"  {CORPUS_NAMES[source]:13s} {title:10s} {data:9s} {cells}")
 
 
@@ -1134,7 +1143,7 @@ def print_paired_differences(title: str, runs: Runs) -> None:
             print(f"\n{CORPUS_NAMES[source]} -> {CORPUS_NAMES[target]}, {data} against {baseline}")
             for title, pick, scale, lower_is_better in measures:
                 differences = scale * np.array(
-                    [pick(trained[s]) - pick(reference[s]) for s in seeds]
+                    [pick(trained[seed]) - pick(reference[seed]) for seed in seeds]
                 )
                 low, high = bootstrap_interval(differences)
                 improved = int(np.sum(differences < 0 if lower_is_better else differences > 0))

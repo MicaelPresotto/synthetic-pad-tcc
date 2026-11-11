@@ -206,7 +206,9 @@ def main() -> None:
         generators = list(moire)
         real_crop_noise = moire[0].add_sensor_noise if args.noise_real_crops else None
     else:
-        replays = read_crops([s for s in select(source, TRAIN) if s.species == REPLAY])
+        replays = read_crops(
+            [sample for sample in select(source, TRAIN) if sample.species == REPLAY]
+        )
         generators = [
             SpectralTransferGenerator(replays, SpectralConfig(args.spectral_band, seed))
             for seed in copy_seeds
@@ -261,7 +263,7 @@ def main() -> None:
             "attack_crops": int(np.sum(is_attack)),
             "msu_split_seed": args.msu_split_seed,
             "msu_development_subjects": sorted(
-                {s.subject for s in partitions[MSU] if s.partition == DEVELOPMENT}
+                {sample.subject for sample in partitions[MSU] if sample.partition == DEVELOPMENT}
             ),
         },
         "intra": {"corpus": args.train_corpus, **report_on(scored["development"], scored["intra"])},
@@ -272,8 +274,12 @@ def main() -> None:
         json.dumps(
             {
                 name: [
-                    {"image": str(s.image), "species": s.species, "score": float(score)}
-                    for s, score in zip(samples, scores, strict=True)
+                    {
+                        "image": str(sample.image),
+                        "species": sample.species,
+                        "score": float(score),
+                    }
+                    for sample, score in zip(samples, scores, strict=True)
                 ]
                 for name, (samples, scores) in scored.items()
             }

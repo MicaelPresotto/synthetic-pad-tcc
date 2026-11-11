@@ -12,8 +12,11 @@ def eye_aspect_ratio(landmarks: np.ndarray) -> float:
     """Mean over both eyes of the two eyelid gaps over twice the eye width; near 0 when shut."""
     ratios = []
     for eye in (landmarks[LEFT_EYE, :2], landmarks[RIGHT_EYE, :2]):
-        gaps = np.linalg.norm(eye[1] - eye[5]) + np.linalg.norm(eye[2] - eye[4])
-        ratios.append(gaps / (2 * np.linalg.norm(eye[0] - eye[3])))
+        outer_corner, upper_outer, upper_inner, inner_corner, lower_inner, lower_outer = eye
+        eyelid_gaps = np.linalg.norm(upper_outer - lower_outer) + np.linalg.norm(
+            upper_inner - lower_inner
+        )
+        ratios.append(eyelid_gaps / (2 * np.linalg.norm(outer_corner - inner_corner)))
     return float(np.mean(ratios))
 
 

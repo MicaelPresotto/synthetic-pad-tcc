@@ -160,12 +160,15 @@ def main() -> None:
     first = first_generator_draws(crop, args.first_generator_checkout)
     calibrated = MoireRecaptureGenerator(fringes)
     evolution = [
-        [("Bona fide", crop), *((f"First generator ({k})", d) for k, d in enumerate(first, 1))],
+        [
+            ("Bona fide", crop),
+            *((f"First generator ({number})", draw) for number, draw in enumerate(first, 1)),
+        ],
         [
             ("Real replay", photo),
             *(
-                (f"Calibrated ({k})", calibrated.generate(crop, scene=k))
-                for k in range(1, DRAWS + 1)
+                (f"Calibrated ({number})", calibrated.generate(crop, scene=number))
+                for number in range(1, DRAWS + 1)
             ),
         ],
     ]

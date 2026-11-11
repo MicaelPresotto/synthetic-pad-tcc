@@ -117,19 +117,21 @@ def report(corpus: str, groups: dict[str, np.ndarray], config: MoireConfig) -> d
     measured = {group: appearance(images) for group, images in groups.items()}
     reference = measured[BONA_FIDE]
     tone = {
-        group: {name: m.tone[name] / reference.tone[name] for name in reference.tone}
-        for group, m in measured.items()
+        group: {name: look.tone[name] / reference.tone[name] for name in reference.tone}
+        for group, look in measured.items()
     }
     colour = {
-        group: (m.chroma_power / reference.chroma_power).round(3).tolist()
-        for group, m in measured.items()
+        group: (look.chroma_power / reference.chroma_power).round(3).tolist()
+        for group, look in measured.items()
     }
     print(f"\n{corpus}, training partition, relative to bona fide")
     for group, ratios in tone.items():
-        print(f"  {group:10s} " + "  ".join(f"{name} {v:.2f}" for name, v in ratios.items()))
+        print(
+            f"  {group:10s} " + "  ".join(f"{name} {ratio:.2f}" for name, ratio in ratios.items())
+        )
     print(f"  chroma power by band of cycles per width, from {CHROMA_BANDS}")
     for group, powers in colour.items():
-        print(f"  {group:10s} " + " ".join(f"{v:5.2f}" for v in powers))
+        print(f"  {group:10s} " + " ".join(f"{power:5.2f}" for power in powers))
     distance = appearance_distance(measured[GENERATED], measured[REPLAY])
     print(f"  distance from generated to real replay {distance:.4f}")
     return {"tone": tone, "chroma_power": colour, "distance_to_replay": distance}

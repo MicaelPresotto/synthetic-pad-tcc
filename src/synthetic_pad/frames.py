@@ -127,8 +127,8 @@ def sample_face_crops(
     index = 0
     try:
         while wanted:
-            ok, frame = capture.read()
-            if not ok:
+            decoded, frame = capture.read()
+            if not decoded:
                 break
             if index in wanted:
                 wanted.discard(index)

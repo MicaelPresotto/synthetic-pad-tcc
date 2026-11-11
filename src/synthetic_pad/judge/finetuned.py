@@ -232,7 +232,9 @@ def build_model(
 
 
 def _stage_channels(model: nn.Module, stage: str) -> int:
-    convolutions = [m for m in model.get_submodule(stage).modules() if isinstance(m, nn.Conv2d)]
+    convolutions = [
+        module for module in model.get_submodule(stage).modules() if isinstance(module, nn.Conv2d)
+    ]
     return convolutions[-1].out_channels
 
 

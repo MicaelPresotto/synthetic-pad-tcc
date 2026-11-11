@@ -19,6 +19,9 @@ TRAIN = "train"
 DEVELOPMENT = "devel"
 TEST = "test"
 
+MSU_BOX_COLUMNS = 5
+"""The frame number and the two corners of the face box, in each row of an MSU-MFSD face file."""
+
 MSU_ATTACK_SPECIES = {"ipad_video": REPLAY, "iphone_video": REPLAY, "printed_photo": PRINT}
 REPLAY_MOBILE_PARTITIONS = (TRAIN, DEVELOPMENT, TEST)
 
@@ -122,7 +125,7 @@ def _read_msu_boxes(path: Path) -> dict[int, FaceBox]:
     rows = np.loadtxt(path, delimiter=",", ndmin=2)
     return {
         int(frame): (round(x1), round(y1), round(x2 - x1), round(y2 - y1))
-        for frame, x1, y1, x2, y2 in rows[:, :5]
+        for frame, x1, y1, x2, y2 in rows[:, :MSU_BOX_COLUMNS]
     }
 
 
