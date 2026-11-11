@@ -7,6 +7,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from figure_style import FIGURE_WIDTH_IN, INK
 from matplotlib.figure import Figure
 
 from synthetic_pad.dataset import read_image
@@ -31,9 +32,7 @@ ZOOM_FACTOR = 4
 DETAIL_BLUR_SIGMA_PX = 1.0
 DETAIL_GAIN = 8.0
 MID_GREY = 128.0
-FIGURE_WIDTH_IN = 6.3
 TITLE_HEIGHT_IN = 0.25
-INK = "#52514e"
 
 type Panel = tuple[str, RgbImage]
 

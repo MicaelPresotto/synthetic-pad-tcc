@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from figure_style import FIGURE_WIDTH_IN, GRID, INK, SERIES_COLOURS
 from matplotlib.figure import Figure
 from matplotlib.ticker import NullFormatter
 
@@ -42,12 +43,8 @@ BOOTSTRAP_RESAMPLES = 10_000
 BOOTSTRAP_SEED = 0
 CONFIDENCE = 0.95
 TARGET_BPCER = 0.05
-FIGURE_WIDTH_IN = 6.3
 FIGURE_HEIGHT_IN = 2.6
 SPECTRUM_TICKS = (0.5, 1.0, 2.0, 5.0, 10.0)
-SERIES_COLOURS = ("#2a78d6", "#eb6834", "#1baf7a")
-INK = "#52514e"
-GRID = "#d9d8d4"
 SOURCE_LINE = r"{\footnotesize Source: prepared by the author (2026).}"
 NOT_RUN = "--"
 COLUMN_GAP_PT = 4
