@@ -27,6 +27,7 @@ from synthetic_pad.evaluation.metrics import (
     classification_metrics,
 )
 from synthetic_pad.frames import FRAMES_PER_VIDEO, CropSample, load_partitions, select
+from synthetic_pad.generators.moire import DRAWN_FRINGE_STAGES
 from synthetic_pad.video_scores import SYNTHETIC_REPLAYS
 
 CORPUS_NAMES = {MSU: "MSU-MFSD", REPLAY_MOBILE: "Replay-Mobile"}
@@ -35,7 +36,6 @@ CONFIGURATIONS = ("real", "synthetic", "mixed")
 SPECIES = ("replay", "print")
 MOTION_CUES = ("blinks", "pulse")
 RECORDED_KINDS = (PRINT, "replay of a photo", "replay of a video")
-STAGES = ("geometry", "tone", "glare", "lens", "moire", "noise")
 TONE_STATISTICS = ("saturation", "contrast", "black_level", "white_level", "sharpness")
 GENERATED = "generated"
 BOOTSTRAP_RESAMPLES = 10_000
@@ -438,7 +438,7 @@ def ablation_table(runs: Runs) -> str:
         ]
         for group in groups
     }
-    others = [stage for stage in STAGES if stage != "moire"]
+    others = [stage for stage in DRAWN_FRINGE_STAGES if stage != "moire"]
     lines = (
         ("Every stage", ["every stage"]),
         ("Every stage but moiré", ["every stage but moire"]),

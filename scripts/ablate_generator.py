@@ -1,37 +1,19 @@
 import argparse
-import dataclasses
 import json
-from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import torch
 
 from synthetic_pad.corpora import BONA_FIDE, TEST
 from synthetic_pad.frames import load_partitions, read_crops, select
-from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
+from synthetic_pad.generators.moire import (
+    STAGE_OFF,
+    MoireConfig,
+    MoireRecaptureGenerator,
+    switched_off,
+)
 from synthetic_pad.judge.finetuned import FineTunedDetector
-
-STAGE_OFF = {
-    "geometry": {"tilt_x": 0.0, "tilt_y": 0.0, "rotation_deg": 0.0},
-    "tone": {"contrast": 1.0, "saturation": 1.0, "black_level": 0.0, "white_level": 1.0},
-    "glare": {"glare_intensity": 0.0},
-    "lens": {"blur_sigma_px": 0.0},
-    "moire": {"moire_amplitude": 0.0},
-    "screen": {"screen_min_pitch_px": 0.0, "screen_max_pitch_px": 0.0},
-    "noise": {"noise_sigma_levels": 0.0, "noise_to_bona_fide": 0.0},
-}
-
-
-def switched_off(config: MoireConfig, stages: Iterable[str]) -> MoireConfig:
-    """The configuration with the given stages disabled. A field the configuration does
-    not have is skipped, so the first generator, which had no saturation control, works too."""
-    known = {field.name for field in dataclasses.fields(config)}
-    neutral: dict[str, Any] = {
-        name: value for stage in stages for name, value in STAGE_OFF[stage].items() if name in known
-    }
-    return dataclasses.replace(config, **neutral)
 
 
 def variants(config: MoireConfig) -> dict[str, MoireConfig]:

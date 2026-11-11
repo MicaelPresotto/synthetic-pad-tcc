@@ -9,10 +9,13 @@ import pytest
 
 from synthetic_pad.domain import RgbImage
 from synthetic_pad.generators.moire import (
+    DRAWN_FRINGE_STAGES,
+    STAGE_OFF,
     MoireConfig,
     MoireRecaptureGenerator,
     noise_level,
     read_fitted_config,
+    switched_off,
 )
 
 NEUTRAL = MoireConfig(
@@ -455,3 +458,23 @@ class TestReadFittedConfig:
         path = tmp_path / "fitted.json"
         path.write_text(json.dumps({"distance": 0.1, "config": dataclasses.asdict(fitted)}))
         assert read_fitted_config(path) == fitted
+
+
+class TestSwitchedOff:
+    def test_with_every_stage_off_the_image_comes_back_unchanged(
+        self, face_like_image: RgbImage
+    ) -> None:
+        every_stage_off = switched_off(MoireConfig(), STAGE_OFF)
+        np.testing.assert_array_equal(
+            MoireRecaptureGenerator(every_stage_off).generate(face_like_image), face_like_image
+        )
+
+    def test_leaves_the_other_stages_as_they_were(self) -> None:
+        config = MoireConfig()
+        without_noise = switched_off(config, ["noise"])
+        assert without_noise.noise_sigma_levels == 0.0
+        assert without_noise.moire_amplitude == config.moire_amplitude
+
+    def test_drawn_fringe_stages_leave_the_simulated_screen_out(self) -> None:
+        assert "screen" not in DRAWN_FRINGE_STAGES
+        assert set(DRAWN_FRINGE_STAGES) | {"screen"} == set(STAGE_OFF)
