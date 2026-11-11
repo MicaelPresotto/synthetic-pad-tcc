@@ -4,6 +4,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from figure_style import FIGURE_WIDTH_IN, GRID, INK, SERIES_COLOURS
 from matplotlib.figure import Figure
 
 from synthetic_pad.dataset import read_image
@@ -12,14 +13,11 @@ from synthetic_pad.generators.moire import MoireRecaptureGenerator, read_fitted_
 
 SWAY_PX = 4.0
 SHOWN_FRAMES = 4
-FIGURE_WIDTH_IN = 6.3
 TRACE_HEIGHT_IN = 1.6
-INK = "#52514e"
-GRID = "#d9d8d4"
 SERIES = (
     ("Bona fide", INK),
-    ("One screen", "#2a78d6"),
-    ("Screen per frame", "#eb6834"),
+    ("One screen", SERIES_COLOURS[0]),
+    ("Screen per frame", SERIES_COLOURS[1]),
 )
 
 

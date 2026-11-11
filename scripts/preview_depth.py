@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from figure_style import FIGURE_WIDTH_IN, INK
 from matplotlib.figure import Figure
 
 from synthetic_pad.dataset import read_image
@@ -13,11 +14,9 @@ from synthetic_pad.frames import face_crop
 from synthetic_pad.generators.moire import MoireRecaptureGenerator, read_fitted_config
 
 FINE_GRID = 14
-FIGURE_WIDTH_IN = 6.3
 TITLE_HEIGHT_IN = 0.2
 ROW_HEIGHT_IN = 1.2
 COLOUR_MAP = "viridis"
-INK = "#52514e"
 COLUMN_TITLES = (
     "Input crop",
     "Depth Anything V2",
