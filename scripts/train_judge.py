@@ -8,13 +8,12 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from synthetic_pad.calibration import read_fitted_config
 from synthetic_pad.corpora import CORPORA, DEVELOPMENT, MSU, REPLAY, TEST, TRAIN
 from synthetic_pad.depth import read_depth_maps
 from synthetic_pad.domain import AttackGenerator, RgbImage
 from synthetic_pad.evaluation.report import pad_report
 from synthetic_pad.frames import MSU_SPLIT_SEED, CropSample, load_partitions, read_crops, select
-from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
+from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator, read_fitted_config
 from synthetic_pad.generators.spectral import SpectralConfig, SpectralTransferGenerator
 from synthetic_pad.judge.finetuned import (
     ARCHITECTURES,

@@ -3,10 +3,9 @@ from pathlib import Path
 
 import numpy as np
 
-from synthetic_pad.calibration import read_fitted_config
 from synthetic_pad.corpora import BONA_FIDE, CORPORA, REPLAY, TRAIN
 from synthetic_pad.frames import load_partitions, read_crops, select
-from synthetic_pad.generators.moire import MoireRecaptureGenerator, noise_level
+from synthetic_pad.generators.moire import MoireRecaptureGenerator, noise_level, read_fitted_config
 
 
 def median_noise(images: np.ndarray) -> float:
