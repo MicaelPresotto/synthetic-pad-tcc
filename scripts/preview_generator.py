@@ -7,18 +7,22 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from ablate_generator import switched_off
 from matplotlib.figure import Figure
 
 from synthetic_pad.dataset import read_image
 from synthetic_pad.domain import RgbImage
 from synthetic_pad.frames import face_crop
-from synthetic_pad.generators.moire import MoireRecaptureGenerator, noise_level, read_fitted_config
+from synthetic_pad.generators.moire import (
+    DRAWN_FRINGE_STAGES,
+    MoireRecaptureGenerator,
+    noise_level,
+    read_fitted_config,
+    switched_off,
+)
 from synthetic_pad.generators.spectral import SpectralTransferGenerator
 
 SCENE = 1
 DRAWS = 3
-STAGES = ("geometry", "tone", "glare", "lens", "moire", "noise")
 STAGE_TITLES = ("Geometry", "+ Tone", "+ Glare", "+ Lens blur", "+ Moiré", "+ Noise")
 ZOOM_TOP = 80
 ZOOM_LEFT = 56
@@ -149,7 +153,7 @@ def main() -> None:
 
     stages: list[Panel] = [("Bona fide", crop)]
     for index, title in enumerate(STAGE_TITLES):
-        kept = switched_off(fringes, STAGES[index + 1 :])
+        kept = switched_off(fringes, DRAWN_FRINGE_STAGES[index + 1 :])
         stages.append((title, MoireRecaptureGenerator(kept).generate(crop, scene=SCENE)))
     stages.append(("+ Noise, zoomed", zoomed(stages[-1][1])))
     draw_grid([stages[:4], stages[4:]], args.output_dir / "fig-generator-stages.pdf")
@@ -169,7 +173,7 @@ def main() -> None:
     draw_grid(evolution, args.output_dir / "fig-generator-evolution.pdf")
 
     fixed_noise = read_fitted_config(args.fixed_noise_config)
-    noise_alone = switched_off(fixed_noise, STAGES[:-1])
+    noise_alone = switched_off(fixed_noise, DRAWN_FRINGE_STAGES[:-1])
     noisy: list[Panel] = [
         ("Bona fide", crop),
         ("Noise alone", MoireRecaptureGenerator(noise_alone).generate(crop, scene=SCENE)),

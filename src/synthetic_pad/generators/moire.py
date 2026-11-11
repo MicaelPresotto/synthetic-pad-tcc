@@ -1,8 +1,8 @@
 import json
 import math
 import warnings
-from collections.abc import Mapping
-from dataclasses import asdict, dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -121,6 +121,29 @@ class MoireConfig:
 
 def read_fitted_config(path: Path) -> MoireConfig:
     return MoireConfig(**json.loads(path.read_text())["config"])
+
+
+STAGE_OFF = {
+    "geometry": {"tilt_x": 0.0, "tilt_y": 0.0, "rotation_deg": 0.0},
+    "tone": {"contrast": 1.0, "saturation": 1.0, "black_level": 0.0, "white_level": 1.0},
+    "glare": {"glare_intensity": 0.0},
+    "lens": {"blur_sigma_px": 0.0},
+    "moire": {"moire_amplitude": 0.0},
+    "screen": {"screen_min_pitch_px": 0.0, "screen_max_pitch_px": 0.0},
+    "noise": {"noise_sigma_levels": 0.0, "noise_to_bona_fide": 0.0},
+}
+DRAWN_FRINGE_STAGES = tuple(stage for stage in STAGE_OFF if stage != "screen")
+"""The stages of the generator that draws its fringes, without the simulated screen."""
+
+
+def switched_off(config: MoireConfig, stages: Iterable[str]) -> MoireConfig:
+    """The configuration with the given stages disabled. A field the configuration does
+    not have is skipped, so the first generator, which had no saturation control, works too."""
+    known = {field.name for field in fields(config)}
+    neutral: dict[str, Any] = {
+        name: value for stage in stages for name, value in STAGE_OFF[stage].items() if name in known
+    }
+    return replace(config, **neutral)
 
 
 class MoireRecaptureGenerator(AttackGenerator):
