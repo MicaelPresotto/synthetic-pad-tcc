@@ -11,8 +11,8 @@ import numpy as np
 import torch
 
 from synthetic_pad.blinks import blink_score, eye_aspect_ratio, frames_below_half
-from synthetic_pad.corpora import Recording
-from synthetic_pad.frames import CORPORA, load_partitions
+from synthetic_pad.corpora import CORPORA, DEVELOPMENT, TEST, Recording
+from synthetic_pad.frames import load_partitions
 from synthetic_pad.video_scores import (
     Footage,
     Recapture,
@@ -24,7 +24,7 @@ from synthetic_pad.video_scores import (
 )
 
 FRAME_STEP = 3
-EVALUATED = ("devel", "test")
+EVALUATED = (DEVELOPMENT, TEST)
 
 
 def eye_aspect_ratios(aligner: Any, recording: Recording, recapture: Recapture) -> np.ndarray:

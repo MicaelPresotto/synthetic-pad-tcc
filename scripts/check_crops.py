@@ -3,8 +3,8 @@ from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
 
+from synthetic_pad.corpora import CORPORA
 from synthetic_pad.frames import (
-    CORPORA,
     DAMAGE_DISTANCE_RATIO,
     DAMAGE_FLAT_EXCESS,
     CropSample,

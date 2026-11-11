@@ -9,7 +9,16 @@ import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.ticker import NullFormatter
 
-from synthetic_pad.corpora import BONA_FIDE, PRINT, REPLAY
+from synthetic_pad.corpora import (
+    BONA_FIDE,
+    DEVELOPMENT,
+    MSU,
+    PRINT,
+    REPLAY,
+    REPLAY_MOBILE,
+    TEST,
+    TRAIN,
+)
 from synthetic_pad.evaluation.metrics import (
     acer,
     apcer,
@@ -20,8 +29,8 @@ from synthetic_pad.evaluation.metrics import (
 from synthetic_pad.frames import FRAMES_PER_VIDEO, CropSample, load_partitions, select
 from synthetic_pad.video_scores import SYNTHETIC_REPLAYS
 
-CORPUS_NAMES = {"msu": "MSU-MFSD", "replay-mobile": "Replay-Mobile"}
-DIRECTIONS = (("msu", "replay-mobile"), ("replay-mobile", "msu"))
+CORPUS_NAMES = {MSU: "MSU-MFSD", REPLAY_MOBILE: "Replay-Mobile"}
+DIRECTIONS = ((MSU, REPLAY_MOBILE), (REPLAY_MOBILE, MSU))
 CONFIGURATIONS = ("real", "synthetic", "mixed")
 SPECIES = ("replay", "print")
 MOTION_CUES = ("blinks", "pulse")
@@ -48,7 +57,7 @@ LOG_ODDS_BIN_WIDTH = 0.5
 BAND_OPACITY = 0.15
 HISTOGRAM_OPACITY = 0.6
 SYNTHETIC_PER_BONA_FIDE = 1
-PARTITION_NAMES = {"train": "Training", "devel": "Development", "test": "Test"}
+PARTITION_NAMES = {TRAIN: "Training", DEVELOPMENT: "Development", TEST: "Test"}
 CENTRED_X = ">{\\centering\\arraybackslash}X"
 
 type Report = dict[str, Any]
@@ -135,7 +144,7 @@ def composition_rows(
     species = Counter(sample.species for sample in select(samples, partition))
     bona_fide, printed, replayed = species[BONA_FIDE], species[PRINT], species[REPLAY]
     name = PARTITION_NAMES[partition]
-    if partition != "train":
+    if partition != TRAIN:
         return [(name, (bona_fide, printed, replayed, 0))]
     synthetic = SYNTHETIC_PER_BONA_FIDE * bona_fide
     return [
@@ -756,7 +765,7 @@ def depth_table(one_label: Runs, variants: Sequence[tuple[str, Runs]]) -> str:
 def splits_table(splits: Sequence[tuple[str, Runs]]) -> str:
     rows = []
     for title, runs in splits:
-        real, mixed = runs[("msu", "real")], runs[("msu", "mixed")]
+        real, mixed = runs[(MSU, "real")], runs[(MSU, "mixed")]
         cells = [
             title,
             development_subjects(real),
@@ -792,7 +801,7 @@ def splits_table(splits: Sequence[tuple[str, Runs]]) -> str:
 def pooled_splits_cells(splits: Sequence[tuple[str, Runs]]) -> list[str]:
     """All draws together: mean errors over every run, and the mean of the per-draw differences
     with an interval that resamples the draws, since the seeds of one draw share its subjects."""
-    pairs = [(runs[("msu", "real")], runs[("msu", "mixed")]) for _, runs in splits]
+    pairs = [(runs[(MSU, "real")], runs[(MSU, "mixed")]) for _, runs in splits]
     differences = [cross_hter_differences(mixed, real) for real, mixed in pairs]
 
     def pooled(pick: Callable[[Report], float], index: int) -> np.ndarray:
@@ -1291,7 +1300,7 @@ def main() -> None:
         ("3D face model", "targets from a 3D face model", find_runs(args.depth_variants[2])),
     ]
     splits = [
-        ("Original", {**real_only, ("msu", "mixed"): matched_one[("msu", "mixed")]}),
+        ("Original", {**real_only, (MSU, "mixed"): matched_one[(MSU, "mixed")]}),
         *((f"Split {index}", find_runs(path)) for index, path in enumerate(args.msu_splits, 1)),
     ]
     first_generator_runs = find_runs(args.first_generator_runs)

@@ -10,7 +10,15 @@ import numpy as np
 from skimage.data import lbp_frontal_face_cascade_filename
 from skimage.feature import Cascade
 
-from synthetic_pad.corpora import BONA_FIDE, FaceBox, Recording
+from synthetic_pad.corpora import (
+    BONA_FIDE,
+    DEVELOPMENT,
+    MSU,
+    REPLAY_MOBILE,
+    TRAIN,
+    FaceBox,
+    Recording,
+)
 from synthetic_pad.dataset import MANIFEST_NAME, WORKING_RESOLUTION, read_image, write_image
 from synthetic_pad.domain import RgbImage
 
@@ -18,7 +26,6 @@ FRAMES_PER_VIDEO = 10
 FACE_CROP_SCALE = 1.4
 DETECTION_SCALE_FACTOR = 1.2
 SMALLEST_FACE_PX = 60
-CORPORA = ("msu", "replay-mobile")
 MSU_DEVELOPMENT_SUBJECTS = 5
 MSU_SPLIT_SEED = 20260928
 FLAT_BLOCK_SIDE = 8
@@ -200,9 +207,9 @@ def load_partitions(
     """Crops of every corpus; MSU-MFSD has no development partition, so five of its
     training subjects, drawn with the split seed, are held out as one."""
     msu = hold_out_subjects(
-        load_crops(frames_root / "msu"), "train", "devel", MSU_DEVELOPMENT_SUBJECTS, msu_split_seed
+        load_crops(frames_root / MSU), TRAIN, DEVELOPMENT, MSU_DEVELOPMENT_SUBJECTS, msu_split_seed
     )
-    return {"msu": msu, "replay-mobile": load_crops(frames_root / "replay-mobile")}
+    return {MSU: msu, REPLAY_MOBILE: load_crops(frames_root / REPLAY_MOBILE)}
 
 
 def select(samples: Sequence[CropSample], partition: str) -> list[CropSample]:

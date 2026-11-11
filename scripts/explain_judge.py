@@ -6,10 +6,9 @@ import cv2
 import numpy as np
 import torch
 
-from synthetic_pad.corpora import BONA_FIDE
+from synthetic_pad.corpora import BONA_FIDE, CORPORA, TEST
 from synthetic_pad.dataset import write_image
 from synthetic_pad.frames import (
-    CORPORA,
     FACE_CROP_SCALE,
     CropSample,
     face_cells,
@@ -69,7 +68,7 @@ def groups(
 ) -> dict[str, np.ndarray]:
     found: dict[str, np.ndarray] = {}
     for scenario, tested in (("intra", corpus), ("cross", _other(corpus))):
-        samples = select(partitions[tested], "test")
+        samples = select(partitions[tested], TEST)
         for species in sorted({sample.species for sample in samples}):
             chosen = [sample for sample in samples if sample.species == species]
             found[f"{scenario} {tested} {species}"] = read_crops(chosen)

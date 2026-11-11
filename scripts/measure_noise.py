@@ -4,8 +4,8 @@ from pathlib import Path
 import numpy as np
 
 from synthetic_pad.calibration import read_fitted_config
-from synthetic_pad.corpora import BONA_FIDE, REPLAY
-from synthetic_pad.frames import CORPORA, load_partitions, read_crops, select
+from synthetic_pad.corpora import BONA_FIDE, CORPORA, REPLAY, TRAIN
+from synthetic_pad.frames import load_partitions, read_crops, select
 from synthetic_pad.generators.moire import MoireRecaptureGenerator, noise_level
 
 
@@ -27,7 +27,7 @@ def main() -> None:
     args = build_parser().parse_args()
     partitions = load_partitions(args.frames)
     for corpus in CORPORA:
-        training = select(partitions[corpus], "train")
+        training = select(partitions[corpus], TRAIN)
         print(f"\n{corpus}, training partition, median noise in grey levels")
         medians = {}
         for species in sorted({sample.species for sample in training}):

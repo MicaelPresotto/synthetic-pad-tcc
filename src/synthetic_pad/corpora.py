@@ -11,8 +11,16 @@ BONA_FIDE = "bona fide"
 REPLAY = "replay"
 PRINT = "print"
 
+MSU = "msu"
+REPLAY_MOBILE = "replay-mobile"
+CORPORA = (MSU, REPLAY_MOBILE)
+
+TRAIN = "train"
+DEVELOPMENT = "devel"
+TEST = "test"
+
 MSU_ATTACK_SPECIES = {"ipad_video": REPLAY, "iphone_video": REPLAY, "printed_photo": PRINT}
-REPLAY_MOBILE_PARTITIONS = ("train", "devel", "test")
+REPLAY_MOBILE_PARTITIONS = (TRAIN, DEVELOPMENT, TEST)
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,15 +41,15 @@ class Recording:
 
 def read_msu(root: Path) -> list[Recording]:
     partition_of = {
-        **dict.fromkeys(_subject_list(root / "train_sub_list.txt"), "train"),
-        **dict.fromkeys(_subject_list(root / "test_sub_list.txt"), "test"),
+        **dict.fromkeys(_subject_list(root / "train_sub_list.txt"), TRAIN),
+        **dict.fromkeys(_subject_list(root / "test_sub_list.txt"), TEST),
     }
     recordings = []
     for face_file in sorted((root / "scene01").glob("*/*.face")):
         subject = _client_id(face_file.stem)
         recordings.append(
             Recording(
-                corpus="msu",
+                corpus=MSU,
                 video=_msu_video(face_file),
                 partition=partition_of[subject],
                 subject=subject,
@@ -62,7 +70,7 @@ def read_replay_mobile(root: Path) -> list[Recording]:
             )
             recordings.append(
                 Recording(
-                    corpus="replay-mobile",
+                    corpus=REPLAY_MOBILE,
                     video=video,
                     partition=partition,
                     subject=_client_id(video.stem),
@@ -73,7 +81,7 @@ def read_replay_mobile(root: Path) -> list[Recording]:
     return recordings
 
 
-READERS = {"msu": read_msu, "replay-mobile": read_replay_mobile}
+READERS = {MSU: read_msu, REPLAY_MOBILE: read_replay_mobile}
 
 
 def _subject_list(path: Path) -> list[str]:
