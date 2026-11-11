@@ -34,8 +34,8 @@ def eye_aspect_ratios(aligner: Any, recording: Recording, recapture: Recapture) 
     index = 0
     try:
         while True:
-            ok, frame = capture.read()
-            if not ok:
+            decoded, frame = capture.read()
+            if not decoded:
                 break
             box = recording.face_boxes.get(index)
             if index % FRAME_STEP == 0 and box is not None:

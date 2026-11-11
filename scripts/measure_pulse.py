@@ -60,8 +60,8 @@ def skin_colors(recording: Recording, recapture: Recapture) -> tuple[np.ndarray,
     colors = []
     try:
         for index in range(round(WINDOW_SECONDS * fps)):
-            ok, frame = capture.read()
-            if not ok:
+            decoded, frame = capture.read()
+            if not decoded:
                 break
             box = recording.face_boxes.get(index, box)
             rgb = np.asarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), dtype=np.uint8)

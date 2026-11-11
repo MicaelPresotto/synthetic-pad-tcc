@@ -31,6 +31,8 @@ RAW_LEVELS = 65535
 NOISE_SEARCH_CEILING = 4.0
 NOISE_SEARCH_STEPS = 20
 NOISE_KERNEL = np.array([[1, -2, 1], [-2, 4, -2], [1, -2, 1]], dtype=np.float64)
+NOISE_KERNEL_GAIN = float(np.linalg.norm(NOISE_KERNEL))
+"""The factor by which NOISE_KERNEL scales the standard deviation of white noise."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -446,7 +448,9 @@ def noise_level(image: RgbImage) -> float:
     ensure_rgb_uint8(image)
     luma = image.astype(np.float64) @ LUMA_WEIGHTS
     response = cv2.filter2D(luma, cv2.CV_64F, NOISE_KERNEL)[1:-1, 1:-1]
-    return float(np.sqrt(np.pi / 2.0) * np.abs(response).sum() / (6.0 * response.size))
+    return float(
+        np.sqrt(np.pi / 2.0) * np.abs(response).sum() / (NOISE_KERNEL_GAIN * response.size)
+    )
 
 
 def _matching_sigma_levels(canvas: FloatImage, unit_noise: FloatImage, target: float) -> float:
