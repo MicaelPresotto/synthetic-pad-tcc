@@ -9,18 +9,11 @@ import numpy as np
 import torch
 
 from synthetic_pad.calibration import read_fitted_config
-from synthetic_pad.corpora import REPLAY
+from synthetic_pad.corpora import CORPORA, DEVELOPMENT, MSU, REPLAY, TEST, TRAIN
 from synthetic_pad.depth import read_depth_maps
 from synthetic_pad.domain import AttackGenerator, RgbImage
 from synthetic_pad.evaluation.report import pad_report
-from synthetic_pad.frames import (
-    CORPORA,
-    MSU_SPLIT_SEED,
-    CropSample,
-    load_partitions,
-    read_crops,
-    select,
-)
+from synthetic_pad.frames import MSU_SPLIT_SEED, CropSample, load_partitions, read_crops, select
 from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
 from synthetic_pad.generators.spectral import SpectralConfig, SpectralTransferGenerator
 from synthetic_pad.judge.finetuned import (
@@ -214,13 +207,13 @@ def main() -> None:
         generators = list(moire)
         real_crop_noise = moire[0].add_sensor_noise if args.noise_real_crops else None
     else:
-        replays = read_crops([s for s in select(source, "train") if s.species == REPLAY])
+        replays = read_crops([s for s in select(source, TRAIN) if s.species == REPLAY])
         generators = [
             SpectralTransferGenerator(replays, SpectralConfig(args.spectral_band, seed))
             for seed in copy_seeds
         ]
     images, is_attack = training_set(
-        select(source, "train"),
+        select(source, TRAIN),
         args.data,
         generators,
         real_crop_noise,
@@ -230,7 +223,7 @@ def main() -> None:
 
     depth_targets = None
     if args.depth_maps is not None:
-        bona_fide = [sample for sample in select(source, "train") if not sample.is_attack]
+        bona_fide = [sample for sample in select(source, TRAIN) if not sample.is_attack]
         maps = read_depth_maps(
             args.depth_maps / f"{args.train_corpus}.npz", bona_fide, args.frames / args.train_corpus
         )
@@ -242,9 +235,9 @@ def main() -> None:
 
     scored: dict[str, tuple[list[CropSample], Scores]] = {}
     for name, samples in (
-        ("development", select(source, "devel")),
-        ("intra", select(source, "test")),
-        ("cross", select(partitions[target_corpus], "test")),
+        ("development", select(source, DEVELOPMENT)),
+        ("intra", select(source, TEST)),
+        ("cross", select(partitions[target_corpus], TEST)),
     ):
         scored[name] = (samples, detector.score_batch(read_crops(samples)))
 
@@ -269,7 +262,7 @@ def main() -> None:
             "attack_crops": int(np.sum(is_attack)),
             "msu_split_seed": args.msu_split_seed,
             "msu_development_subjects": sorted(
-                {s.subject for s in partitions["msu"] if s.partition == "devel"}
+                {s.subject for s in partitions[MSU] if s.partition == DEVELOPMENT}
             ),
         },
         "intra": {"corpus": args.train_corpus, **report_on(scored["development"], scored["intra"])},

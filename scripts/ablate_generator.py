@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from synthetic_pad.corpora import BONA_FIDE
+from synthetic_pad.corpora import BONA_FIDE, TEST
 from synthetic_pad.frames import load_partitions, read_crops, select
 from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
 from synthetic_pad.judge.finetuned import FineTunedDetector
@@ -61,7 +61,7 @@ def main() -> None:
     recorded = training.get("generator", {})
     settings = {name: value for name, value in recorded.items() if name != "generator"}
     detector = FineTunedDetector.load(args.run / "judge.pt", args.device)
-    tested = select(load_partitions(args.frames)[training["corpus"]], "test")
+    tested = select(load_partitions(args.frames)[training["corpus"]], TEST)
     bona_fide = read_crops([sample for sample in tested if sample.species == BONA_FIDE])
 
     medians = {}

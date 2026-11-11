@@ -5,10 +5,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from synthetic_pad.corpora import CORPORA
 from synthetic_pad.dataset import write_manifest
 from synthetic_pad.depth import DEPTH_GRID, crop_key, depth_target, write_depth_maps
 from synthetic_pad.depth_estimation import ESTIMATION_BATCH, DepthAnything, FaceModel
-from synthetic_pad.frames import CORPORA, FACE_CROP_SCALE, load_crops, read_crops
+from synthetic_pad.frames import FACE_CROP_SCALE, load_crops, read_crops
 
 ESTIMATORS: dict[str, Callable[[str], DepthAnything | FaceModel]] = {
     "depth-anything": DepthAnything,

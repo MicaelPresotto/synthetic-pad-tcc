@@ -14,8 +14,8 @@ from synthetic_pad.calibration import (
     appearance_distance,
     read_fitted_config,
 )
-from synthetic_pad.corpora import BONA_FIDE, REPLAY
-from synthetic_pad.frames import CORPORA, CropSample, load_partitions, read_crops, select
+from synthetic_pad.corpora import BONA_FIDE, CORPORA, REPLAY, TRAIN
+from synthetic_pad.frames import CropSample, load_partitions, read_crops, select
 from synthetic_pad.generators.moire import MoireConfig, MoireRecaptureGenerator
 
 GENERATED = "generated"
@@ -169,7 +169,7 @@ def main() -> None:
 
     base = read_fitted_config(args.generator_config) if args.generator_config else MoireConfig()
     if args.fit:
-        groups = sample_by_species(select(partitions[args.fit], "train"), args.crops, rng)
+        groups = sample_by_species(select(partitions[args.fit], TRAIN), args.crops, rng)
         draw = draw_screen_candidate if args.screen else draw_candidate
         fitted = fit(args.fit, groups, args.trials, rng, base, draw, base_competes=not args.screen)
         if args.screen:
@@ -180,7 +180,7 @@ def main() -> None:
 
     summary: dict[str, object] = {"generator": asdict(base), "bands": CHROMA_BANDS}
     for corpus in CORPORA:
-        groups = sample_by_species(select(partitions[corpus], "train"), args.crops, rng)
+        groups = sample_by_species(select(partitions[corpus], TRAIN), args.crops, rng)
         summary[corpus] = report(corpus, groups, base)
     args.output.write_text(json.dumps(summary, indent=2) + "\n")
 

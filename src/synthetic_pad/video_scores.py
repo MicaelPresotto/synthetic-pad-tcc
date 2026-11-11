@@ -13,10 +13,9 @@ from typing import Any
 import numpy as np
 
 from synthetic_pad.calibration import read_fitted_config
-from synthetic_pad.corpora import BONA_FIDE, READERS, REPLAY, Recording
+from synthetic_pad.corpora import BONA_FIDE, CORPORA, DEVELOPMENT, READERS, REPLAY, TEST, Recording
 from synthetic_pad.domain import RgbImage
 from synthetic_pad.evaluation.report import pad_report
-from synthetic_pad.frames import CORPORA
 from synthetic_pad.generators.moire import MoireRecaptureGenerator
 
 SYNTHETIC_REPLAYS = ("synthetic, one screen", "synthetic, screen per frame")
@@ -64,7 +63,7 @@ def synthetic_replays(
     one screen for the whole video and once through a new screen in every frame."""
     generator = MoireRecaptureGenerator(read_fitted_config(GENERATOR_CONFIGS[corpus]))
     one_screen, screen_per_frame = SYNTHETIC_REPLAYS
-    for video, recording, _ in recorded(corpus, root, partition_of, ("test",)):
+    for video, recording, _ in recorded(corpus, root, partition_of, (TEST,)):
         if video["kind"] == BONA_FIDE:
             scene = zlib.crc32(video["video"].encode())
             yield {**video, "kind": one_screen}, recording, partial(generator.generate, scene=scene)
@@ -95,10 +94,13 @@ def report(source: list[Video], tested: list[Video]) -> dict[str, Any]:
     """The synthetic replays get rows of their own but stay out of the "all attacks" figures."""
     by_kind: dict[str, list[float]] = defaultdict(list)
     for video in tested:
-        if video["partition"] == "test" and video["kind"] != BONA_FIDE:
+        if video["partition"] == TEST and video["kind"] != BONA_FIDE:
             by_kind[video["kind"]].append(video["score"])
-    development = (scores(source, "devel", attack=True), scores(source, "devel", attack=False))
-    bona_fide = scores(tested, "test", attack=False)
+    development = (
+        scores(source, DEVELOPMENT, attack=True),
+        scores(source, DEVELOPMENT, attack=False),
+    )
+    bona_fide = scores(tested, TEST, attack=False)
     recorded_attacks = {
         kind: np.array(values)
         for kind, values in sorted(by_kind.items())

@@ -8,9 +8,16 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from synthetic_pad.corpora import FaceBox, Recording
+from synthetic_pad.corpora import (
+    CORPORA,
+    DEVELOPMENT,
+    TEST,
+    TRAIN,
+    FaceBox,
+    Recording,
+)
 from synthetic_pad.domain import RgbImage
-from synthetic_pad.frames import CORPORA, load_partitions
+from synthetic_pad.frames import load_partitions
 from synthetic_pad.pulse import (
     PULSE_FREQUENCIES,
     WINDOW_SECONDS,
@@ -29,7 +36,7 @@ from synthetic_pad.video_scores import (
 )
 
 SKIN_SHARE = 0.6
-MEASURED = ("train", "devel", "test")
+MEASURED = (TRAIN, DEVELOPMENT, TEST)
 RESTING_HEART_RATE_HZ = (1.0, 1.7)
 
 

@@ -4,10 +4,10 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from synthetic_pad.corpora import BONA_FIDE
+from synthetic_pad.corpora import BONA_FIDE, CORPORA, TRAIN
 from synthetic_pad.depth import depth_target, face_prominence, shape_similarity
 from synthetic_pad.depth_estimation import ESTIMATION_BATCH, DepthAnything
-from synthetic_pad.frames import CORPORA, CropSample, load_partitions, read_crops, select
+from synthetic_pad.frames import CropSample, load_partitions, read_crops, select
 
 
 def estimate(estimator: DepthAnything, samples: list[CropSample]) -> tuple[np.ndarray, np.ndarray]:
@@ -44,7 +44,7 @@ def main() -> None:
     estimator = DepthAnything(args.device)
     partitions = load_partitions(args.frames)
     for corpus in CORPORA:
-        training = select(partitions[corpus], "train")
+        training = select(partitions[corpus], TRAIN)
         species = sorted({sample.species for sample in training}, key=lambda s: s != BONA_FIDE)
         estimated = {
             name: estimate(estimator, [sample for sample in training if sample.species == name])
